@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pandas
+pydantic
+scikit-learn
+joblib
+websockets
+OTXv2

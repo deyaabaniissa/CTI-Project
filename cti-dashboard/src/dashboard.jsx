@@ -1,0 +1,912 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Activity,
+  AlertTriangle,
+  Bell,
+  Calendar,
+  CheckCircle2,
+  ChevronDown,
+  Clock3,
+  Cpu,
+  Download,
+  Eye,
+  FileText,
+  HeartPulse,
+  Hospital,
+  LogOut,
+  Radio,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  ShieldCheck,
+  Signal,
+  Trash2,
+  WifiOff,
+  X,
+  Zap,
+} from 'lucide-react';
+import {
+  Area,
+  AreaChart,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import './dashboard.css';
+
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8000/ws/live-logs';
+const LOG_STORAGE_KEY = 'healthcare_soc_logs_v4';
+const MAX_LOGS = 120;
+
+const CATEGORY_META = {
+  Attack: { label: 'Attack', icon: Zap, color: '#e85d75' },
+  environmentMonitoring: { label: 'Environment', icon: Cpu, color: '#e6a23c' },
+  patientMonitoring: { label: 'Patient Devices', icon: HeartPulse, color: '#3ab795' },
+};
+
+const TLP_META = {
+  'TLP:RED': { label: 'TLP:RED', color: '#e85d75', tone: 'red' },
+  'TLP:AMBER': { label: 'TLP:AMBER', color: '#e6a23c', tone: 'amber' },
+  'TLP:GREEN': { label: 'TLP:GREEN', color: '#3ab795', tone: 'green' },
+  'TLP:CLEAR': { label: 'TLP:CLEAR', color: '#92a4b7', tone: 'clear' },
+};
+
+const DEFAULT_FILTERS = {
+  category: 'ALL',
+  tlp: 'ALL',
+  date: '',
+  timeFrom: '',
+  timeTo: '',
+  query: '',
+};
+
+const loadSavedLogs = () => {
+  try {
+    const saved = localStorage.getItem(LOG_STORAGE_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+};
+
+const normalizeLog = (log) => ({
+  ...log,
+  log_id: String(log.log_id || `LOG-${Date.now()}`),
+  category: String(log.category || 'Unknown'),
+  department: String(log.department || 'General'),
+  destination_target: String(log.destination_target || '0.0.0.0'),
+  source_ip: String(log.source_ip || '0.0.0.0'),
+  data_mb: Number(log.data_mb || 0),
+  is_threat: Number(log.is_threat || 0),
+  is_in_otx: Boolean(log.is_in_otx),
+  tlp: String(log.tlp || 'TLP:CLEAR'),
+  timestamp: String(log.timestamp || new Date().toLocaleTimeString('en-GB')),
+  date: String(log.date || new Date().toISOString().slice(0, 10)),
+});
+
+const escapeHtml = (value) =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
+const exportCsv = (logs) => {
+  const columns = [
+    'log_id',
+    'date',
+    'timestamp',
+    'category',
+    'department',
+    'source_ip',
+    'destination_target',
+    'data_mb',
+    'is_in_otx',
+    'tlp',
+  ];
+  const rows = logs.map((log) =>
+    columns
+      .map((column) => `"${String(log[column] ?? '').replace(/"/g, '""')}"`)
+      .join(','),
+  );
+  const blob = new Blob([[columns.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `healthcare-soc-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+const formatReportLabel = (key) =>
+  key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .replace(/\bIp\b/g, 'IP')
+    .replace(/\bOtx\b/g, 'OTX')
+    .replace(/\bTlp\b/g, 'TLP');
+
+const getLogThreatStatus = (log) => (log.is_threat === 1 || log.tlp === 'TLP:RED' || log.is_in_otx ? 'Threat' : 'Safe');
+
+const getReportRows = (log) => {
+  const preferredOrder = [
+    'log_id',
+    'date',
+    'timestamp',
+    'category',
+    'traffic_class',
+    'department',
+    'source_ip',
+    'destination_target',
+    'data_mb',
+    'data_unit',
+    'is_threat',
+    'is_in_otx',
+    'tlp',
+  ];
+  const seen = new Set();
+  const rows = [];
+
+  preferredOrder.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(log, key)) {
+      seen.add(key);
+      rows.push([formatReportLabel(key), log[key]]);
+    }
+  });
+
+  Object.entries(log).forEach(([key, value]) => {
+    if (!seen.has(key)) {
+      rows.push([formatReportLabel(key), value]);
+    }
+  });
+
+  return rows;
+};
+
+const getReportRecommendations = (log) => {
+  if (log.tlp === 'TLP:RED' || log.is_in_otx) {
+    return [
+      'Escalate to the incident response owner immediately.',
+      'Validate source and destination assets before allowing continued communication.',
+      'Preserve related telemetry and attach this report to the incident record.',
+    ];
+  }
+
+  if (log.tlp === 'TLP:AMBER' || log.is_threat === 1) {
+    return [
+      'Review the event with the responsible department.',
+      'Correlate with endpoint and firewall telemetry for the same time window.',
+      'Keep sharing limited to the response team until the event is confirmed.',
+    ];
+  }
+
+  if (log.tlp === 'TLP:GREEN') {
+    return [
+      'Monitor for repeated high-volume activity from the same assets.',
+      'Share within trusted operational teams if needed for awareness.',
+    ];
+  }
+
+  return [
+    'No immediate action required.',
+    'Retain the report for audit history and baseline comparison.',
+  ];
+};
+
+const downloadTextFile = (filename, content, type = 'text/html;charset=utf-8') => {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+const buildReportHtml = (log) => {
+  const tlpMeta = TLP_META[log.tlp] || TLP_META['TLP:CLEAR'];
+  const status = getLogThreatStatus(log);
+  const rows = getReportRows(log)
+    .map(
+      ([label, value]) =>
+        `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(typeof value === 'boolean' ? (value ? 'Yes' : 'No') : value)}</td></tr>`,
+    )
+    .join('');
+  const recommendations = getReportRecommendations(log)
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join('');
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Incident Report - ${escapeHtml(log.log_id)}</title>
+    <style>
+      body { margin: 0; font-family: Inter, Segoe UI, Arial, sans-serif; color: #16222c; background: #f4f7fa; }
+      main { max-width: 920px; margin: 24px auto; padding: 34px; background: #fff; border: 1px solid #d8e1e8; }
+      header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 3px solid #167f92; padding-bottom: 18px; }
+      h1, h2 { margin: 0; }
+      h1 { font-size: 25px; }
+      h2 { margin-top: 26px; font-size: 18px; }
+      p { margin: 8px 0 0; color: #637485; }
+      .badge { align-self: flex-start; border-radius: 6px; padding: 8px 12px; color: #fff; background: ${tlpMeta.color}; font-weight: 800; }
+      .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 22px; }
+      .summary div { padding: 12px; background: #f6f9fb; border: 1px solid #d8e1e8; border-radius: 6px; }
+      .summary span { display: block; color: #637485; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+      .summary strong { display: block; margin-top: 5px; overflow-wrap: anywhere; }
+      table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+      th, td { border: 1px solid #d8e1e8; padding: 10px 12px; text-align: left; vertical-align: top; }
+      th { width: 34%; background: #f6f9fb; }
+      td { overflow-wrap: anywhere; }
+      li { margin: 8px 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Healthcare CTI SOC Incident Report</h1>
+          <p>Report for ${escapeHtml(log.log_id)} generated from live hospital telemetry.</p>
+        </div>
+        <span class="badge">${escapeHtml(log.tlp)}</span>
+      </header>
+      <section class="summary" aria-label="Report summary">
+        <div><span>Status</span><strong>${escapeHtml(status)}</strong></div>
+        <div><span>Category</span><strong>${escapeHtml(log.category)}</strong></div>
+        <div><span>Observed Time</span><strong>${escapeHtml(`${log.date} ${log.timestamp}`)}</strong></div>
+      </section>
+      <h2>Log Details</h2>
+      <table><tbody>${rows}</tbody></table>
+      <h2>Recommended Actions</h2>
+      <ul>${recommendations}</ul>
+    </main>
+  </body>
+</html>`;
+};
+
+const installReport = async (log, reportElement) => {
+  const filename = `healthcare-soc-report-${log.log_id}.pdf`;
+
+  try {
+    const html2pdf = (await import('html2pdf.js')).default;
+    await html2pdf()
+      .set({
+        margin: 0.35,
+        filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
+      })
+      .from(reportElement)
+      .save();
+  } catch {
+    downloadTextFile(`healthcare-soc-report-${log.log_id}.html`, buildReportHtml(log));
+  }
+};
+
+export default function Dashboard({ onLogout }) {
+  const [logs, setLogs] = useState(loadSavedLogs);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [connectionStatus, setConnectionStatus] = useState('connecting');
+  const [lastSeen, setLastSeen] = useState(null);
+  const [selectedReportLog, setSelectedReportLog] = useState(null);
+  const reportRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const retryRef = useRef(0);
+
+  useEffect(() => {
+    let socket;
+    let closedByUnmount = false;
+
+    const connect = () => {
+      setConnectionStatus('connecting');
+      socket = new WebSocket(WS_URL);
+
+      socket.onopen = () => {
+        retryRef.current = 0;
+        setConnectionStatus('live');
+      };
+
+      socket.onmessage = (event) => {
+        const incomingLog = normalizeLog(JSON.parse(event.data));
+        setLastSeen(new Date());
+        setLogs((current) => {
+          const updated = [incomingLog, ...current].slice(0, MAX_LOGS);
+          localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(updated));
+          return updated;
+        });
+      };
+
+      socket.onerror = () => {
+        setConnectionStatus('offline');
+      };
+
+      socket.onclose = () => {
+        if (closedByUnmount) {
+          return;
+        }
+
+        setConnectionStatus('offline');
+        retryRef.current += 1;
+        const delay = Math.min(12000, 1500 * retryRef.current);
+        reconnectTimerRef.current = window.setTimeout(connect, delay);
+      };
+    };
+
+    connect();
+
+    return () => {
+      closedByUnmount = true;
+      window.clearTimeout(reconnectTimerRef.current);
+      socket?.close();
+    };
+  }, []);
+
+  const stats = useMemo(() => {
+    const totals = logs.reduce(
+      (acc, log) => {
+        const isThreat = log.is_threat === 1 || log.tlp === 'TLP:RED' || log.is_in_otx;
+        acc.total += 1;
+        acc.threats += isThreat ? 1 : 0;
+        acc.safe += isThreat ? 0 : 1;
+        acc.otxMatches += log.is_in_otx ? 1 : 0;
+        acc.volume += log.data_mb;
+        acc.categories[log.category] = (acc.categories[log.category] || 0) + 1;
+        acc.tlp[log.tlp] = (acc.tlp[log.tlp] || 0) + 1;
+        return acc;
+      },
+      {
+        total: 0,
+        threats: 0,
+        safe: 0,
+        otxMatches: 0,
+        volume: 0,
+        categories: {},
+        tlp: {},
+      },
+    );
+
+    return {
+      ...totals,
+      riskScore: totals.total ? Math.round((totals.threats / totals.total) * 100) : 0,
+    };
+  }, [logs]);
+
+  const filteredLogs = useMemo(() => {
+    const query = filters.query.trim().toLowerCase();
+
+    return logs.filter((log) => {
+      const matchesCategory = filters.category === 'ALL' || log.category === filters.category;
+      const matchesTlp = filters.tlp === 'ALL' || log.tlp === filters.tlp;
+      const matchesDate = !filters.date || log.date === filters.date;
+      const matchesFrom = !filters.timeFrom || log.timestamp >= filters.timeFrom;
+      const matchesTo = !filters.timeTo || log.timestamp <= filters.timeTo;
+      const searchable = [
+        log.log_id,
+        log.category,
+        log.department,
+        log.source_ip,
+        log.destination_target,
+        log.tlp,
+      ]
+        .join(' ')
+        .toLowerCase();
+      const matchesQuery = !query || searchable.includes(query);
+
+      return matchesCategory && matchesTlp && matchesDate && matchesFrom && matchesTo && matchesQuery;
+    });
+  }, [filters, logs]);
+
+  const trendData = useMemo(
+    () =>
+      logs
+        .slice(0, 18)
+        .reverse()
+        .map((log, index) => ({
+          name: log.timestamp,
+          traffic: index + 1,
+          threats: log.is_threat === 1 || log.tlp === 'TLP:RED' || log.is_in_otx ? 1 : 0,
+          volume: Number(log.data_mb.toFixed(2)),
+        })),
+    [logs],
+  );
+
+  const tlpData = useMemo(
+    () =>
+      Object.entries(TLP_META).map(([key, meta]) => ({
+        name: meta.label,
+        value: stats.tlp[key] || 0,
+        color: meta.color,
+      })),
+    [stats.tlp],
+  );
+
+  const categoryData = Object.entries(CATEGORY_META).map(([key, meta]) => ({
+    key,
+    ...meta,
+    count: stats.categories[key] || 0,
+  }));
+
+  const connectionMeta = {
+    live: { label: 'Live connected', icon: Signal },
+    connecting: { label: 'Connecting', icon: Radio },
+    offline: { label: 'Reconnecting', icon: WifiOff },
+  }[connectionStatus];
+
+  const updateFilter = (key, value) => {
+    setFilters((current) => ({ ...current, [key]: value }));
+  };
+
+  const clearLogs = () => {
+    if (!window.confirm('Clear local dashboard history?')) {
+      return;
+    }
+
+    localStorage.removeItem(LOG_STORAGE_KEY);
+    setLogs([]);
+  };
+
+  const resetFilters = () => {
+    setFilters(DEFAULT_FILTERS);
+  };
+
+  const handlePreviewReport = (log) => {
+    setSelectedReportLog(log);
+  };
+
+  const handleInstallReport = async (log) => {
+    if (selectedReportLog?.log_id === log.log_id && reportRef.current) {
+      await installReport(log, reportRef.current);
+      return;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = buildReportHtml(log);
+    document.body.appendChild(wrapper);
+    await installReport(log, wrapper.querySelector('main') || wrapper);
+    wrapper.remove();
+  };
+
+  const hasActiveFilters =
+    filters.category !== 'ALL' ||
+    filters.tlp !== 'ALL' ||
+    Boolean(filters.date || filters.timeFrom || filters.timeTo || filters.query);
+  const ConnectionIcon = connectionMeta.icon;
+
+  return (
+    <div className="soc-shell">
+      <aside className="soc-sidebar" aria-label="SOC navigation">
+        <div className="brand-block">
+          <div className="brand-icon" aria-hidden="true">
+            <Hospital size={28} />
+          </div>
+          <div>
+            <span>Healthcare</span>
+            <strong>CTI SOC</strong>
+          </div>
+        </div>
+
+        <nav className="side-nav" aria-label="Dashboard sections">
+          <a className="active" href="#overview">
+            <Activity size={18} />
+            Overview
+          </a>
+          <a href="#traffic">
+            <Radio size={18} />
+            Live Traffic
+          </a>
+          <a href="#reports">
+            <FileText size={18} />
+            Reports
+          </a>
+        </nav>
+
+        <div className="side-status">
+          <span>Protocol</span>
+          <strong>TLP automation</strong>
+          <p>Classifies events by risk, OTX match, and packet context.</p>
+        </div>
+      </aside>
+
+      <main className="soc-main">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">Real-time hospital telemetry</p>
+            <h1>Threat operations dashboard</h1>
+          </div>
+          <div className="topbar-actions">
+            <div className={`connection-pill ${connectionStatus}`}>
+              <ConnectionIcon size={16} />
+              <span>{connectionMeta.label}</span>
+            </div>
+            <button className="icon-button" type="button" onClick={() => exportCsv(filteredLogs)} title="Export filtered logs" aria-label="Export filtered logs">
+              <Download size={18} />
+            </button>
+            <button className="icon-button danger" type="button" onClick={clearLogs} title="Clear local history" aria-label="Clear local history">
+              <Trash2 size={18} />
+            </button>
+            <button className="logout-button" type="button" onClick={onLogout}>
+              <LogOut size={16} />
+              Logout
+            </button>
+          </div>
+        </header>
+
+        <section className="hero-band" id="overview">
+          <div>
+            <div className="hero-title-row">
+              <span className="pulse-dot" aria-hidden="true" />
+              <span>{lastSeen ? `Last event ${lastSeen.toLocaleTimeString()}` : 'Waiting for live feed'}</span>
+            </div>
+            <h2>Hospital traffic risk is currently {stats.riskScore}% across the local event window.</h2>
+            <p>
+              The console blends MQTT telemetry, OTX indicator matching, and TLP handling into a single triage view for
+              patient safety and security operations.
+            </p>
+          </div>
+          <div className="risk-meter" style={{ '--risk': stats.riskScore }} aria-label={`Risk score ${stats.riskScore} percent`}>
+            <span>{stats.riskScore}</span>
+            <small>% risk</small>
+          </div>
+        </section>
+
+        <section className="metric-grid" aria-label="Security metrics">
+          <MetricCard icon={ShieldAlert} label="Threat Events" value={stats.threats} accent="#e85d75" helper={`${stats.otxMatches} OTX matches`} />
+          <MetricCard icon={ShieldCheck} label="Safe Traffic" value={stats.safe} accent="#3ab795" helper={`${stats.total} total events`} />
+          <MetricCard icon={Bell} label="Live Categories" value={categoryData.filter((item) => item.count > 0).length} accent="#61b4d8" helper="Attack, env, patient" />
+          <MetricCard icon={Download} label="Observed Volume" value={stats.volume.toFixed(1)} accent="#d7b46a" helper="KB in saved window" />
+        </section>
+
+        <section className="analytics-grid" aria-label="Traffic analytics">
+          <div className="surface">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Signal trend</p>
+                <h2>Threat movement</h2>
+              </div>
+              <Clock3 size={18} />
+            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={trendData}>
+                <defs>
+                  <linearGradient id="threatGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#e85d75" stopOpacity={0.45} />
+                    <stop offset="95%" stopColor="#e85d75" stopOpacity={0.02} />
+                  </linearGradient>
+                  <linearGradient id="volumeGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#61b4d8" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#61b4d8" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="name" tickLine={false} axisLine={false} minTickGap={22} />
+                <YAxis tickLine={false} axisLine={false} width={32} />
+                <Tooltip content={<ChartTooltip />} />
+                <Area type="monotone" dataKey="volume" stroke="#61b4d8" fill="url(#volumeGradient)" strokeWidth={2} />
+                <Area type="stepAfter" dataKey="threats" stroke="#e85d75" fill="url(#threatGradient)" strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="surface">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Handling labels</p>
+                <h2>TLP distribution</h2>
+              </div>
+              <AlertTriangle size={18} />
+            </div>
+            <div className="pie-layout">
+              <ResponsiveContainer width="52%" height={220}>
+                <PieChart>
+                  <Pie data={tlpData} dataKey="value" nameKey="name" innerRadius={56} outerRadius={88} paddingAngle={3}>
+                    {tlpData.map((entry) => (
+                      <Cell key={entry.name} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<ChartTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="tlp-legend">
+                {tlpData.map((entry) => (
+                  <div key={entry.name}>
+                    <span style={{ backgroundColor: entry.color }} />
+                    <strong>{entry.name}</strong>
+                    <em>{entry.value}</em>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="category-grid" aria-label="Telemetry categories">
+          {categoryData.map((item) => {
+            const CategoryIcon = item.icon;
+            return (
+              <div className="category-tile" key={item.key}>
+                <span style={{ color: item.color }}>
+                  <CategoryIcon size={20} />
+                </span>
+                <div>
+                  <strong>{item.label}</strong>
+                  <p>{item.count} events</p>
+                </div>
+              </div>
+            );
+          })}
+        </section>
+
+        <section className="surface traffic-surface" id="traffic">
+          <div className="section-heading traffic-heading">
+            <div>
+              <p className="eyebrow">Live stream</p>
+              <h2>Traffic events and incident reports</h2>
+            </div>
+            <span>{filteredLogs.length} visible</span>
+          </div>
+
+          <div className="filter-panel" aria-label="Traffic filters">
+            <div className="search-shell">
+              <Search size={18} />
+              <input
+                value={filters.query}
+                onChange={(event) => updateFilter('query', event.target.value)}
+                placeholder="Search log, IP, category, or department"
+              />
+            </div>
+
+            <FilterSelect label="Category" value={filters.category} onChange={(value) => updateFilter('category', value)}>
+              <option value="ALL">All categories</option>
+              {Object.entries(CATEGORY_META).map(([key, meta]) => (
+                <option key={key} value={key}>
+                  {meta.label}
+                </option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect label="TLP" value={filters.tlp} onChange={(value) => updateFilter('tlp', value)}>
+              <option value="ALL">All TLP</option>
+              {Object.keys(TLP_META).map((key) => (
+                <option key={key} value={key}>
+                  {key}
+                </option>
+              ))}
+            </FilterSelect>
+
+            <label className="date-filter">
+              <Calendar size={16} />
+              <input type="date" value={filters.date} onChange={(event) => updateFilter('date', event.target.value)} />
+            </label>
+
+            <label className="date-filter compact">
+              <Clock3 size={16} />
+              <input type="time" value={filters.timeFrom} onChange={(event) => updateFilter('timeFrom', event.target.value)} />
+            </label>
+
+            <label className="date-filter compact">
+              <Clock3 size={16} />
+              <input type="time" value={filters.timeTo} onChange={(event) => updateFilter('timeTo', event.target.value)} />
+            </label>
+
+            {hasActiveFilters && (
+              <button className="soft-button" type="button" onClick={resetFilters}>
+                <X size={16} />
+                Reset
+              </button>
+            )}
+          </div>
+
+          <div className="log-list" id="reports">
+            {filteredLogs.length === 0 ? (
+              <div className="empty-state">
+                <RefreshCw size={28} />
+                <strong>No events match the current filters.</strong>
+                <p>Live telemetry will appear here as soon as the backend stream is available.</p>
+              </div>
+            ) : (
+              filteredLogs.map((log) => (
+                <LogRow
+                  key={`${log.log_id}-${log.timestamp}-${log.destination_target}`}
+                  log={log}
+                  onPreview={handlePreviewReport}
+                  onInstall={handleInstallReport}
+                />
+              ))
+            )}
+          </div>
+        </section>
+      </main>
+
+      {selectedReportLog && (
+        <ReportModal
+          log={selectedReportLog}
+          reportRef={reportRef}
+          onClose={() => setSelectedReportLog(null)}
+          onInstall={() => handleInstallReport(selectedReportLog)}
+        />
+      )}
+    </div>
+  );
+}
+
+function MetricCard({ icon: Icon, label, value, accent, helper }) {
+  return (
+    <div className="metric-card" style={{ '--accent': accent }}>
+      <span className="metric-icon">
+        <Icon size={19} />
+      </span>
+      <div>
+        <p>{label}</p>
+        <strong>{value}</strong>
+        <small>{helper}</small>
+      </div>
+    </div>
+  );
+}
+
+function FilterSelect({ label, value, onChange, children }) {
+  return (
+    <label className="select-filter">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        {children}
+      </select>
+      <ChevronDown size={16} />
+    </label>
+  );
+}
+
+function LogRow({ log, onPreview, onInstall }) {
+  const tlpMeta = TLP_META[log.tlp] || TLP_META['TLP:CLEAR'];
+  const categoryMeta = CATEGORY_META[log.category] || { label: log.category, icon: Activity, color: '#92a4b7' };
+  const CategoryIcon = categoryMeta.icon;
+  const isThreat = log.is_threat === 1 || log.tlp === 'TLP:RED' || log.is_in_otx;
+
+  return (
+    <article className={`log-row ${tlpMeta.tone}`}>
+      <div className="log-main">
+        <div className="log-title">
+          <span className="category-chip" style={{ '--chip': categoryMeta.color }}>
+            <CategoryIcon size={14} />
+            {categoryMeta.label}
+          </span>
+          <strong>{log.log_id}</strong>
+          <span className={`tlp-chip ${tlpMeta.tone}`}>{log.tlp}</span>
+        </div>
+        <p>
+          <span>{log.source_ip}</span>
+          <em>to</em>
+          <span>{log.destination_target}</span>
+        </p>
+        <div className="log-meta">
+          <span>{log.department}</span>
+          <span>{log.data_mb} KB</span>
+          <span>{log.date} {log.timestamp}</span>
+          <span>{log.is_in_otx ? 'OTX matched' : 'OTX clean'}</span>
+        </div>
+      </div>
+      <div className="log-actions">
+        <span className={isThreat ? 'status-tag threat' : 'status-tag safe'}>
+          {isThreat ? <ShieldAlert size={14} /> : <CheckCircle2 size={14} />}
+          {isThreat ? 'Threat' : 'Safe'}
+        </span>
+        <button type="button" onClick={() => onPreview(log)}>
+          <Eye size={15} />
+          Preview
+        </button>
+        <button type="button" className="install-report-button" onClick={() => onInstall(log)}>
+          <FileText size={15} />
+          Install
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function ReportModal({ log, reportRef, onClose, onInstall }) {
+  return (
+    <div className="report-modal-backdrop" role="presentation">
+      <section className="report-modal" role="dialog" aria-modal="true" aria-labelledby="report-title">
+        <div className="report-modal-toolbar">
+          <div>
+            <p className="eyebrow">Report preview</p>
+            <h2 id="report-title">{log.log_id}</h2>
+          </div>
+          <div className="report-toolbar-actions">
+            <button type="button" onClick={onInstall}>
+              <Download size={16} />
+              Install Report
+            </button>
+            <button type="button" className="report-close-button" onClick={onClose} aria-label="Close report preview">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <ReportDocument log={log} reportRef={reportRef} />
+      </section>
+    </div>
+  );
+}
+
+function ReportDocument({ log, reportRef }) {
+  const tlpMeta = TLP_META[log.tlp] || TLP_META['TLP:CLEAR'];
+  const status = getLogThreatStatus(log);
+  const recommendations = getReportRecommendations(log);
+
+  return (
+    <article className="report-document" ref={reportRef}>
+      <header className="report-header">
+        <div>
+          <p>Healthcare CTI SOC</p>
+          <h1>Incident Report</h1>
+          <span>Generated from live hospital telemetry and TLP classification.</span>
+        </div>
+        <strong style={{ backgroundColor: tlpMeta.color }}>{log.tlp}</strong>
+      </header>
+
+      <section className="report-summary-grid" aria-label="Report summary">
+        <div>
+          <span>Status</span>
+          <strong>{status}</strong>
+        </div>
+        <div>
+          <span>Category</span>
+          <strong>{log.category}</strong>
+        </div>
+        <div>
+          <span>Observed Time</span>
+          <strong>{log.date} {log.timestamp}</strong>
+        </div>
+      </section>
+
+      <section className="report-section">
+        <h2>Full Log Details</h2>
+        <div className="report-table-wrap">
+          <table>
+            <tbody>
+              {getReportRows(log).map(([label, value]) => (
+                <tr key={label}>
+                  <th>{label}</th>
+                  <td>{typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value ?? '')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="report-section">
+        <h2>Recommended Actions</h2>
+        <ul>
+          {recommendations.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </section>
+    </article>
+  );
+}
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  return (
+    <div className="chart-tooltip">
+      {label && <strong>{label}</strong>}
+      {payload.map((item) => (
+        <span key={item.dataKey || item.name}>
+          {item.name}: {item.value}
+        </span>
+      ))}
+    </div>
+  );
+}
