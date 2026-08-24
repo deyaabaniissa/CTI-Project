@@ -434,6 +434,7 @@ export default function Dashboard({ onLogout }) {
     classes: [],
     metrics: {},
     feature_importance: [],
+    training_dataset: {},
   });
   const [posture, setPosture] = useState({
     state: 'pending',
@@ -613,6 +614,13 @@ export default function Dashboard({ onLogout }) {
   const modelMetrics = modelInfo.metrics || {};
   const featureImportance = (modelInfo.feature_importance || []).slice(0, 8);
   const maxFeatureImportance = featureImportance[0]?.importance || 1;
+  const balanceData = modelInfo.training_dataset?.balance_audit || [];
+  const maxBalanceRows = Math.max(
+    1,
+    ...balanceData.flatMap((item) => [Number(item.source_rows) || 0, Number(item.balanced_rows) || 0]),
+  );
+  const sourceTrainingRows = balanceData.reduce((total, item) => total + (Number(item.source_rows) || 0), 0);
+  const balancedTrainingRows = balanceData.reduce((total, item) => total + (Number(item.balanced_rows) || 0), 0);
 
   const filteredLogs = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
@@ -965,12 +973,49 @@ export default function Dashboard({ onLogout }) {
           </p>
         </section>
 
-        <section className="analytics-grid single" aria-label="Live attack-family analysis">
+        <section className="analytics-grid" aria-label="Training and live exploratory data analysis">
+          <div className="surface dataset-eda">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Training dataset EDA</p>
+                <h2>CICIoMT2024 class balance</h2>
+                <p className="section-description">Actual family counts saved with the deployed model, before and after training-set balancing.</p>
+              </div>
+              <Database size={18} />
+            </div>
+            <div className="dataset-summary">
+              <div><span>Original rows</span><strong>{sourceTrainingRows.toLocaleString()}</strong></div>
+              <div><span>Balanced rows</span><strong>{balancedTrainingRows.toLocaleString()}</strong></div>
+              <div><span>Families</span><strong>{balanceData.length || 6}</strong></div>
+            </div>
+            <div className="balance-legend" aria-label="Class balance legend">
+              <span><i className="original" />Original</span>
+              <span><i className="balanced" />Balanced training</span>
+            </div>
+            <div className="balance-chart">
+              {balanceData.map((item) => (
+                <div className="balance-row" key={item.family}>
+                  <strong>{item.family}</strong>
+                  <div className="balance-bars">
+                    <span className="original" style={{ width: `${(item.source_rows / maxBalanceRows) * 100}%` }}>
+                      <em>{Number(item.source_rows).toLocaleString()}</em>
+                    </span>
+                    <span className="balanced" style={{ width: `${(item.balanced_rows / maxBalanceRows) * 100}%` }}>
+                      <em>{Number(item.balanced_rows).toLocaleString()}</em>
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="dataset-note">Balancing applies only to the training split. The official test split remains untouched for evaluation.</p>
+          </div>
+
           <div className="surface">
             <div className="section-heading">
               <div>
                 <p className="eyebrow">Live EDA</p>
-                <h2>Detected family distribution</h2>
+                <h2>Live prediction distribution</h2>
+                <p className="section-description">Attack families predicted from investigations currently stored in Supabase.</p>
               </div>
               <AlertTriangle size={18} />
             </div>

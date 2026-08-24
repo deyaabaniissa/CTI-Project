@@ -87,6 +87,18 @@ class CatBoostIDSService:
                 if index < len(raw_importance)
             ]
             feature_importance.sort(key=lambda row: row["importance"], reverse=True)
+
+        balance_audit: list[dict[str, Any]] = []
+        raw_balance = artifact.get("balance_audit")
+        if isinstance(raw_balance, pd.DataFrame):
+            for row in raw_balance.to_dict(orient="records"):
+                balance_audit.append({
+                    "family": str(row.get("family", "Unknown")),
+                    "source_rows": int(row.get("source_rows", 0)),
+                    "balanced_rows": int(row.get("balanced_rows", 0)),
+                    "oversampled": bool(row.get("oversampled", False)),
+                })
+
         self.metadata = {
             "status": "trained",
             "artifact": str(self.artifact_path),
@@ -95,6 +107,14 @@ class CatBoostIDSService:
             "classes": self.classes,
             "metrics": self.metrics,
             "feature_importance": feature_importance,
+            "training_dataset": {
+                "name": "CICIoMT2024",
+                "balance_audit": balance_audit,
+                "target_rows_per_family": int(artifact.get("target_rows_per_family") or 0),
+                "train_attack_subclasses": len(artifact.get("train_attack_names") or []),
+                "test_attack_subclasses": len(artifact.get("test_attack_names") or []),
+                "zero_row_rule": str(artifact.get("zero_row_rule") or ""),
+            },
             "excluded_family": artifact.get("excluded_family"),
             "profile_train_files": len(artifact.get("profile_train_files") or []),
             "profile_holdout_files": len(artifact.get("profile_holdout_files") or []),
