@@ -27,15 +27,11 @@ import {
   X,
 } from 'lucide-react';
 import {
-  Area,
-  AreaChart,
   Cell,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip,
-  XAxis,
-  YAxis,
 } from 'recharts';
 import './dashboard.css';
 
@@ -585,7 +581,6 @@ export default function Dashboard({ onLogout }) {
         acc.otxMatches += log.is_in_otx ? 1 : 0;
         const family = String(log.traffic_class || 'Unknown');
         acc.families[family] = (acc.families[family] || 0) + 1;
-        acc.volume += log.data_mb;
         acc.categories[log.category] = (acc.categories[log.category] || 0) + 1;
         acc.tlp[log.tlp] = (acc.tlp[log.tlp] || 0) + 1;
         return acc;
@@ -595,7 +590,6 @@ export default function Dashboard({ onLogout }) {
         threats: 0,
         safe: 0,
         otxMatches: 0,
-        volume: 0,
         categories: {},
         tlp: {},
         families: {},
@@ -644,20 +638,6 @@ export default function Dashboard({ onLogout }) {
       return matchesCategory && matchesTlp && matchesDate && matchesFrom && matchesTo && matchesQuery;
     });
   }, [filters, logs]);
-
-  const trendData = useMemo(
-    () =>
-      logs
-        .slice(0, 18)
-        .reverse()
-        .map((log, index) => ({
-          name: log.timestamp,
-          traffic: index + 1,
-          threats: log.is_threat === 1 || log.tlp === 'TLP:RED' || log.is_in_otx ? 1 : 0,
-          volume: Number(log.data_mb.toFixed(2)),
-        })),
-    [logs],
-  );
 
   const categoryData = Object.entries(CATEGORY_META).map(([key, meta]) => ({
     key,
@@ -985,36 +965,7 @@ export default function Dashboard({ onLogout }) {
           </p>
         </section>
 
-        <section className="analytics-grid" aria-label="Traffic analytics">
-          <div className="surface">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Signal trend</p>
-                <h2>Threat movement</h2>
-              </div>
-              <Clock3 size={18} />
-            </div>
-            <ResponsiveContainer width="100%" height={240}>
-              <AreaChart data={trendData}>
-                <defs>
-                  <linearGradient id="threatGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#e85d75" stopOpacity={0.45} />
-                    <stop offset="95%" stopColor="#e85d75" stopOpacity={0.02} />
-                  </linearGradient>
-                  <linearGradient id="volumeGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#61b4d8" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#61b4d8" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="name" tickLine={false} axisLine={false} minTickGap={22} />
-                <YAxis tickLine={false} axisLine={false} width={32} />
-                <Tooltip content={<ChartTooltip />} />
-                <Area type="monotone" dataKey="volume" stroke="#61b4d8" fill="url(#volumeGradient)" strokeWidth={2} />
-                <Area type="stepAfter" dataKey="threats" stroke="#e85d75" fill="url(#threatGradient)" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-
+        <section className="analytics-grid single" aria-label="Live attack-family analysis">
           <div className="surface">
             <div className="section-heading">
               <div>

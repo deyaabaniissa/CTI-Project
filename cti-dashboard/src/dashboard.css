@@ -358,6 +358,10 @@
   margin-bottom: 18px;
 }
 
+.analytics-grid.single {
+  grid-template-columns: 1fr;
+}
+
 .surface {
   min-width: 0;
   padding: 20px;
