@@ -113,7 +113,6 @@
 .log-actions,
 .connection-pill,
 .icon-button,
-.logout-button,
 .soft-button,
 .category-chip,
 .status-tag {
@@ -206,7 +205,6 @@
 }
 
 .icon-button,
-.logout-button,
 .soft-button {
   min-height: 38px;
   border-radius: 8px;
@@ -225,7 +223,6 @@
   color: #ffc1cb;
 }
 
-.logout-button,
 .soft-button {
   gap: 8px;
   padding: 0 12px;
@@ -1529,7 +1526,6 @@
   }
 
   .connection-pill,
-  .logout-button,
   .soft-button,
   .search-shell,
   .select-filter,

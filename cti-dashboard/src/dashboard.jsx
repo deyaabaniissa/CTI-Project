@@ -15,7 +15,6 @@ import {
   Fingerprint,
   Globe2,
   Hospital,
-  LogOut,
   Radio,
   RefreshCw,
   Search,
@@ -415,7 +414,7 @@ const installReport = async (log, reportElement) => {
   }
 };
 
-export default function Dashboard({ onLogout }) {
+export default function Dashboard() {
   const [logs, setLogs] = useState(loadSavedLogs);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
@@ -799,10 +798,6 @@ export default function Dashboard({ onLogout }) {
             </button>
             <button className="icon-button danger" type="button" onClick={clearLogs} title="Clear local history" aria-label="Clear local history">
               <Trash2 size={18} />
-            </button>
-            <button className="logout-button" type="button" onClick={onLogout}>
-              <LogOut size={16} />
-              Logout
             </button>
           </div>
         </header>

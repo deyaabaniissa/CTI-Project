@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import json
 import os
 import random
@@ -358,42 +357,6 @@ def alerts() -> Any:
 def investigations() -> Any:
     limit = min(max(int(request.args.get("limit", 100)), 1), 500)
     return jsonify({"investigations": database.list_dashboard_logs(limit), "storage": database.status()["backend"]})
-
-
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@hospital.com").strip().lower()
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin12345")
-DEV_OTP_CODE = os.getenv("DEV_OTP_CODE", "").strip()
-OTP_TTL_SECONDS = int(os.getenv("OTP_TTL_SECONDS", "300"))
-otp_store: dict[str, dict[str, Any]] = {}
-
-
-@app.post("/api/admin/login")
-def admin_login() -> Any:
-    payload = request.get_json(silent=True) or {}
-    email = str(payload.get("email") or "").strip().lower()
-    password = str(payload.get("password") or "")
-    if not (hmac.compare_digest(email, ADMIN_EMAIL) and hmac.compare_digest(password, ADMIN_PASSWORD)):
-        return jsonify({"detail": "Invalid admin credentials."}), 401
-    code = DEV_OTP_CODE or f"{secrets.randbelow(1_000_000):06d}"
-    otp_store[email] = {"code": code, "expires_at": time.time() + OTP_TTL_SECONDS}
-    if os.getenv("FLASK_DEBUG", "false").lower() == "true":
-        print(f"Healthcare SOC OTP generated for {email}.")
-    return jsonify({"message": "OTP generated.", "expires_in": OTP_TTL_SECONDS})
-
-
-@app.post("/api/admin/verify-otp")
-def verify_otp() -> Any:
-    payload = request.get_json(silent=True) or {}
-    email = str(payload.get("email") or "").strip().lower()
-    code = str(payload.get("code") or "").strip()
-    entry = otp_store.get(email)
-    if not entry or time.time() > entry["expires_at"]:
-        otp_store.pop(email, None)
-        return jsonify({"detail": "No active or valid verification code."}), 400
-    if not hmac.compare_digest(code, entry["code"]):
-        return jsonify({"detail": "Verification code is not valid."}), 401
-    otp_store.pop(email, None)
-    return jsonify({"message": "Login verified."})
 
 
 @sock.route("/ws/live-logs")
