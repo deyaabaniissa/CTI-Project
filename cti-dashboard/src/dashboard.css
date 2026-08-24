@@ -103,6 +103,100 @@
   padding: 28px;
 }
 
+.site-intro {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(420px, 0.85fr);
+  gap: 28px;
+  overflow: hidden;
+  margin-bottom: 22px;
+  padding: clamp(26px, 4vw, 44px);
+  border: 1px solid rgba(112, 224, 212, 0.18);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 88% 14%, rgba(97, 180, 216, 0.2), transparent 30%),
+    linear-gradient(135deg, rgba(22, 127, 146, 0.2), rgba(14, 20, 26, 0.96) 55%),
+    #11171d;
+}
+
+.site-intro::after {
+  position: absolute;
+  width: 260px;
+  height: 260px;
+  right: -110px;
+  bottom: -140px;
+  border: 1px solid rgba(112, 224, 212, 0.16);
+  border-radius: 50%;
+  content: '';
+}
+
+.intro-copy,
+.intro-capabilities {
+  position: relative;
+  z-index: 1;
+}
+
+.intro-copy h1 {
+  max-width: 820px;
+  margin: 8px 0 0;
+  color: #f3f7fa;
+  font-size: clamp(2rem, 4.4vw, 4.2rem);
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+}
+
+.intro-copy > p:last-child {
+  max-width: 760px;
+  margin: 20px 0 0;
+  color: #aebdca;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.intro-capabilities {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-content: center;
+}
+
+.intro-capabilities article {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 13px;
+  border: 1px solid rgba(206, 218, 228, 0.1);
+  border-radius: 9px;
+  background: rgba(7, 13, 17, 0.52);
+}
+
+.intro-capabilities svg {
+  display: grid;
+  padding: 7px;
+  box-sizing: content-box;
+  border-radius: 8px;
+  color: #70e0d4;
+  background: rgba(112, 224, 212, 0.1);
+}
+
+.intro-capabilities strong,
+.intro-capabilities span {
+  display: block;
+}
+
+.intro-capabilities strong {
+  color: #edf2f7;
+  font-size: 0.82rem;
+}
+
+.intro-capabilities span {
+  margin-top: 4px;
+  color: #8396a7;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
 .topbar,
 .topbar-actions,
 .hero-title-row,
@@ -126,14 +220,14 @@
   margin-bottom: 24px;
 }
 
-.topbar h1,
+.topbar h2,
 .hero-band h2,
 .section-heading h2 {
   margin: 0;
   letter-spacing: 0;
 }
 
-.topbar h1 {
+.topbar h2 {
   font-size: clamp(1.7rem, 3vw, 2.7rem);
 }
 
@@ -1395,6 +1489,10 @@
     margin-bottom: 0;
   }
 
+  .site-intro {
+    grid-template-columns: 1fr;
+  }
+
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1446,6 +1544,14 @@
 
   .hero-band {
     display: grid;
+  }
+
+  .site-intro {
+    padding: 24px 18px;
+  }
+
+  .intro-capabilities {
+    grid-template-columns: 1fr;
   }
 
   .risk-meter {

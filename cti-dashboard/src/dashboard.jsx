@@ -773,10 +773,40 @@ export default function Dashboard() {
       </aside>
 
       <main className="soc-main">
+        <section className="site-intro" aria-labelledby="platform-title">
+          <div className="intro-copy">
+            <p className="eyebrow">University Hospital Security Platform</p>
+            <h1 id="platform-title">Healthcare Cyber Threat Intelligence SOC</h1>
+            <p>
+              Monitor patient access, employee activity, and system/device logs in one place. The platform
+              detects suspicious network behavior, enriches security indicators with live threat intelligence,
+              and produces explainable alerts and incident response recommendations.
+            </p>
+          </div>
+          <div className="intro-capabilities" aria-label="Platform capabilities">
+            <article>
+              <Activity size={18} />
+              <div><strong>Live posture</strong><span>Continuous event and alert monitoring</span></div>
+            </article>
+            <article>
+              <ShieldCheck size={18} />
+              <div><strong>TLP handling</strong><span>Automated traffic handling labels</span></div>
+            </article>
+            <article>
+              <Globe2 size={18} />
+              <div><strong>Threat intelligence</strong><span>Indicator matching across four sources</span></div>
+            </article>
+            <article>
+              <FileText size={18} />
+              <div><strong>Incident reports</strong><span>Printable summaries for analyst triage</span></div>
+            </article>
+          </div>
+        </section>
+
         <header className="topbar">
           <div>
-            <p className="eyebrow">Live healthcare security monitoring</p>
-            <h1>Detection, intelligence & response</h1>
+            <p className="eyebrow">Live security operations</p>
+            <h2>Operational dashboard</h2>
           </div>
           <div className="topbar-actions">
             <button
