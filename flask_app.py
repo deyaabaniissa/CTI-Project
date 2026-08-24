@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
 import random
@@ -8,12 +9,12 @@ import secrets
 import threading
 import time
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, session
 from flask_sock import Sock
 
 from cti.catboost_ids import CatBoostIDSService
@@ -269,7 +270,50 @@ def analyze_and_record(payload: Mapping[str, Any]) -> tuple[dict[str, Any], dict
 
 app = Flask(__name__, static_folder=str(DIST_DIR), static_url_path="")
 app.config["JSON_SORT_KEYS"] = False
+
+IS_MANAGED_DEPLOYMENT = bool(os.getenv("RENDER"))
+required_auth_settings = ("ADMIN_EMAIL", "ADMIN_PASSWORD", "DEV_OTP_CODE", "FLASK_SECRET_KEY")
+missing_auth_settings = [name for name in required_auth_settings if not os.getenv(name)]
+if IS_MANAGED_DEPLOYMENT and missing_auth_settings:
+    raise RuntimeError(
+        "Secure deployment blocked: configure these secret environment variables: "
+        + ", ".join(missing_auth_settings)
+    )
+
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.getenv("ADMIN_PASSWORD") or secrets.token_hex(32)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Strict",
+    SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true",
+    PERMANENT_SESSION_LIFETIME=timedelta(minutes=int(os.getenv("ADMIN_SESSION_MINUTES", "30"))),
+)
 sock = Sock(app)
+
+PUBLIC_API_PATHS = {
+    "/api/health",
+    "/api/admin/login",
+    "/api/admin/verify-otp",
+    "/api/admin/session",
+}
+
+
+@app.before_request
+def require_admin_session() -> Any:
+    if request.path.startswith("/api/") and request.path not in PUBLIC_API_PATHS:
+        if not session.get("admin_authenticated"):
+            return jsonify({"detail": "Authentication required."}), 401
+    return None
+
+
+@app.after_request
+def add_security_headers(response: Any) -> Any:
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.path.startswith("/api/") or request.path == "/":
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/api/health")
@@ -277,10 +321,7 @@ def health() -> Any:
     return jsonify({
         "status": "ok",
         "framework": "Flask",
-        "model": model_service.metadata,
-        "intelligence": intelligence.status(),
-        "integration_sample": SAMPLE_PATH.is_file(),
-        "database": database.status(),
+        "access": "restricted",
     })
 
 
@@ -359,8 +400,72 @@ def investigations() -> Any:
     return jsonify({"investigations": database.list_dashboard_logs(limit), "storage": database.status()["backend"]})
 
 
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@hospital.com").strip().lower()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin12345")
+DEV_OTP_CODE = os.getenv("DEV_OTP_CODE", "").strip()
+OTP_TTL_SECONDS = int(os.getenv("OTP_TTL_SECONDS", "300"))
+otp_store: dict[str, dict[str, Any]] = {}
+
+
+@app.post("/api/admin/login")
+def admin_login() -> Any:
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get("email") or "").strip().lower()
+    password = str(payload.get("password") or "")
+    if not (hmac.compare_digest(email, ADMIN_EMAIL) and hmac.compare_digest(password, ADMIN_PASSWORD)):
+        time.sleep(0.35)
+        return jsonify({"detail": "Invalid admin credentials."}), 401
+
+    session.clear()
+    session["pending_admin_email"] = email
+    code = DEV_OTP_CODE or f"{secrets.randbelow(1_000_000):06d}"
+    otp_store[email] = {"code": code, "expires_at": time.time() + OTP_TTL_SECONDS}
+    if os.getenv("FLASK_DEBUG", "false").lower() == "true":
+        print(f"Healthcare SOC OTP generated for {email}.")
+    return jsonify({"message": "OTP generated.", "expires_in": OTP_TTL_SECONDS})
+
+
+@app.post("/api/admin/verify-otp")
+def verify_otp() -> Any:
+    payload = request.get_json(silent=True) or {}
+    email = str(session.get("pending_admin_email") or "").strip().lower()
+    code = str(payload.get("code") or "").strip()
+    entry = otp_store.get(email)
+    if not entry or time.time() > entry["expires_at"]:
+        otp_store.pop(email, None)
+        session.clear()
+        return jsonify({"detail": "No active or valid verification code."}), 400
+    if not hmac.compare_digest(code, entry["code"]):
+        return jsonify({"detail": "Verification code is not valid."}), 401
+
+    otp_store.pop(email, None)
+    session.clear()
+    session.permanent = True
+    session["admin_authenticated"] = True
+    session["admin_email"] = email
+    return jsonify({"message": "Login verified.", "email": email})
+
+
+@app.get("/api/admin/session")
+def admin_session() -> Any:
+    return jsonify({
+        "authenticated": bool(session.get("admin_authenticated")),
+        "email": session.get("admin_email"),
+    })
+
+
+@app.post("/api/admin/logout")
+def admin_logout() -> Any:
+    session.clear()
+    return jsonify({"message": "Signed out."})
+
+
 @sock.route("/ws/live-logs")
 def live_logs(websocket: Any) -> None:
+    if not session.get("admin_authenticated"):
+        websocket.send(json.dumps({"error": "Authentication required."}))
+        websocket.close()
+        return
     # Opening the dashboard must not manufacture investigations or consume
     # provider quotas. The socket only delivers records persisted elsewhere.
     existing = database.list_dashboard_logs(100)

@@ -23,3 +23,17 @@ services:
         sync: false
       - key: NVD_API_KEY
         sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DEV_OTP_CODE
+        sync: false
+      - key: FLASK_SECRET_KEY
+        sync: false
+      - key: OTP_TTL_SECONDS
+        value: "300"
+      - key: ADMIN_SESSION_MINUTES
+        value: "30"
+      - key: SESSION_COOKIE_SECURE
+        value: "true"

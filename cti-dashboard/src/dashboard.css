@@ -208,6 +208,7 @@
 .connection-pill,
 .icon-button,
 .soft-button,
+.logout-button,
 .category-chip,
 .status-tag {
   display: flex;
@@ -299,7 +300,8 @@
 }
 
 .icon-button,
-.soft-button {
+.soft-button,
+.logout-button {
   min-height: 38px;
   border-radius: 8px;
   color: #edf2f7;
@@ -317,7 +319,8 @@
   color: #ffc1cb;
 }
 
-.soft-button {
+.soft-button,
+.logout-button {
   gap: 8px;
   padding: 0 12px;
   font-weight: 800;
@@ -325,6 +328,12 @@
 
 .soft-button {
   color: #c8d6e2;
+}
+
+.logout-button {
+  color: #ffd3da;
+  background: rgba(232, 93, 117, 0.1);
+  border-color: rgba(232, 93, 117, 0.24);
 }
 
 .hero-band {
@@ -1633,6 +1642,7 @@
 
   .connection-pill,
   .soft-button,
+  .logout-button,
   .search-shell,
   .select-filter,
   .date-filter {
