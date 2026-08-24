@@ -100,7 +100,7 @@ const toFiniteNumber = (value, fallback = 0) => {
 const normalizeLog = (log) => ({
   ...log,
   log_id: String(log.log_id || `LOG-${Date.now()}`),
-  category: String(log.category || 'Unknown'),
+  category: String(log.category || (log.traffic_class ? 'System and device logs' : 'Unknown')),
   department: String(log.department || 'General'),
   destination_target: String(log.destination_target || '0.0.0.0'),
   source_ip: String(log.source_ip || '0.0.0.0'),
@@ -115,6 +115,21 @@ const normalizeLog = (log) => ({
   timestamp: String(log.timestamp || new Date().toLocaleTimeString('en-GB')),
   date: String(log.date || new Date().toISOString().slice(0, 10)),
 });
+
+const mergeLogWindow = (primary, secondary = []) => {
+  const seen = new Set();
+  return [...primary, ...secondary]
+    .map(normalizeLog)
+    .filter((log) => {
+      const identity = String(log.investigation_id || log.log_id);
+      if (seen.has(identity)) {
+        return false;
+      }
+      seen.add(identity);
+      return true;
+    })
+    .slice(0, MAX_LOGS);
+};
 
 const escapeHtml = (value) =>
   String(value)
@@ -436,10 +451,25 @@ export default function Dashboard({ onLogout }) {
       };
 
       socket.onmessage = (event) => {
-        const incomingLog = normalizeLog(JSON.parse(event.data));
+        let payload;
+        try {
+          payload = JSON.parse(event.data);
+        } catch {
+          setConnectionStatus('offline');
+          return;
+        }
+        if (payload.type === 'heartbeat') {
+          setLastSeen(new Date());
+          return;
+        }
+        if (payload.error) {
+          setConnectionStatus('offline');
+          return;
+        }
+        const incomingLog = normalizeLog(payload);
         setLastSeen(new Date());
         setLogs((current) => {
-          const updated = [incomingLog, ...current].slice(0, MAX_LOGS);
+          const updated = mergeLogWindow([incomingLog], current);
           localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(updated));
           return updated;
         });
@@ -476,11 +506,12 @@ export default function Dashboard({ onLogout }) {
       if (forceRefresh) {
         await fetch(`${API_BASE_URL}/api/vulnerabilities/refresh`, { method: 'POST' });
       }
-      const [statusResponse, postureResponse, alertsResponse, databaseResponse] = await Promise.all([
+      const [statusResponse, postureResponse, alertsResponse, databaseResponse, investigationsResponse] = await Promise.all([
         fetch(`${API_BASE_URL}/api/intelligence/status`),
         fetch(`${API_BASE_URL}/api/vulnerabilities/posture`),
         fetch(`${API_BASE_URL}/api/alerts?limit=4`),
         fetch(`${API_BASE_URL}/api/database/status`),
+        fetch(`${API_BASE_URL}/api/investigations?limit=${MAX_LOGS}`),
       ]);
       if (statusResponse.ok) {
         const statusPayload = await statusResponse.json();
@@ -495,6 +526,12 @@ export default function Dashboard({ onLogout }) {
       }
       if (databaseResponse.ok) {
         setDatabaseStatus(await databaseResponse.json());
+      }
+      if (investigationsResponse.ok) {
+        const investigationPayload = await investigationsResponse.json();
+        const persistedLogs = mergeLogWindow(investigationPayload.investigations || []);
+        setLogs(persistedLogs);
+        localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(persistedLogs));
       }
     } catch {
       const offlineSource = { status: 'error' };
@@ -764,7 +801,7 @@ export default function Dashboard({ onLogout }) {
               <span className="pulse-dot" aria-hidden="true" />
               <span>{lastSeen ? `Last event ${lastSeen.toLocaleTimeString()}` : 'Waiting for live feed'}</span>
             </div>
-            <h2>Hospital traffic risk is currently {stats.riskScore}% across the local event window.</h2>
+            <h2>Hospital traffic risk is currently {stats.riskScore}% across the persisted event window.</h2>
             <p>
               The console blends a trained healthcare log model with live OSV, NVD, AlienVault OTX, and
               VirusTotal evidence. Every score keeps its source evidence visible for analyst review.
@@ -777,10 +814,10 @@ export default function Dashboard({ onLogout }) {
         </section>
 
         <section className="metric-grid" aria-label="Security metrics">
-          <MetricCard icon={ShieldAlert} label="Threat Events" value={stats.threats} accent="#e85d75" helper={`${stats.otxMatches} OTX matches`} />
+          <MetricCard icon={ShieldAlert} label="Threat Events" value={stats.threats} accent="#e85d75" helper={`${stats.otxMatches} OTX checks`} />
           <MetricCard icon={ShieldCheck} label="Safe Traffic" value={stats.safe} accent="#3ab795" helper={`${stats.total} total events`} />
-          <MetricCard icon={Bell} label="Live Categories" value={categoryData.filter((item) => item.count > 0).length} accent="#61b4d8" helper="Patient, employee, and device logs" />
-          <MetricCard icon={Download} label="Observed Volume" value={stats.volume.toFixed(1)} accent="#d7b46a" helper="KB in saved window" />
+          <MetricCard icon={Bell} label="Observed Categories" value={categoryData.filter((item) => item.count > 0).length} accent="#61b4d8" helper="Patient, employee, and device logs" />
+          <MetricCard icon={Database} label="Persisted Events" value={databaseStatus.counts?.hospital_events || stats.total} accent="#d7b46a" helper="Supabase investigations" />
         </section>
 
         <section className="intelligence-surface surface" id="intelligence" aria-label="Live intelligence sources">

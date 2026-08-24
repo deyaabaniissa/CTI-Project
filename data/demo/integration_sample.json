@@ -1,0 +1,30 @@
+{
+  "event": {
+    "IAT": 83094352.0,
+    "rst_count": 0.0,
+    "Number": 9.5,
+    "Tot size": 54.0,
+    "psh_flag_number": 0.0,
+    "Min": 54.0,
+    "Rate": 0.6681432723999023,
+    "Header_Length": 54.0,
+    "ack_count": 0.0,
+    "Protocol Type": 6.0,
+    "Tot sum": 567.0,
+    "Max": 54.0,
+    "event_name": "CICIoT2023 DDoS and Log4Shell CTI integration fixture",
+    "sample_origin": "CICIoT2023 unseen external test row",
+    "src_ip": "182.54.217.2",
+    "sha256": "858c3d04334298398c0792520b0b752c0ecbb4e991fe1f48003d89272daace8d",
+    "cve_id": "CVE-2021-44228",
+    "vendor": "Apache",
+    "product": "Log4j",
+    "product_version": "2.14.1",
+    "package_name": "org.apache.logging.log4j:log4j-core",
+    "ecosystem": "Maven",
+    "package_version": "2.14.1",
+    "asset_id": "hospital-integration-test-01",
+    "asset_type": "IoMT gateway test fixture",
+    "asset_criticality": 0.95
+  }
+}

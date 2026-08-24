@@ -27,7 +27,7 @@ from cti.reporting import summarize_provider_evidence
 PROJECT_ROOT = Path(__file__).resolve().parent
 DIST_DIR = PROJECT_ROOT / "cti-dashboard" / "dist"
 MODEL_PATH = PROJECT_ROOT / "official_ciciomt2024_catboost_12_features_6_classes.joblib"
-SAMPLE_PATH = PROJECT_ROOT / "end_to_end_integration_test_result.json"
+SAMPLE_PATH = PROJECT_ROOT / "data" / "demo" / "integration_sample.json"
 RESULTS_PATH = PROJECT_ROOT / "outputs" / "flask_investigations.jsonl"
 
 load_dotenv(PROJECT_ROOT / ".env")
@@ -398,11 +398,25 @@ def verify_otp() -> Any:
 
 @sock.route("/ws/live-logs")
 def live_logs(websocket: Any) -> None:
+    # Opening the dashboard must not manufacture investigations or consume
+    # provider quotas. The socket only delivers records persisted elsewhere.
+    existing = database.list_dashboard_logs(100)
+    seen = {
+        str(row.get("investigation_id") or row.get("log_id"))
+        for row in existing
+        if row.get("investigation_id") or row.get("log_id")
+    }
+    websocket.send(json.dumps({"type": "heartbeat"}))
     while True:
         try:
-            _event, _result, log = analyze_and_record(load_integration_sample())
-            websocket.send(json.dumps(log, ensure_ascii=False, default=str))
-            time.sleep(max(5, int(os.getenv("LIVE_LOG_SECONDS", "12"))))
+            rows = database.list_dashboard_logs(100)
+            for log in reversed(rows):
+                identity = str(log.get("investigation_id") or log.get("log_id") or "")
+                if identity and identity not in seen:
+                    websocket.send(json.dumps(log, ensure_ascii=False, default=str))
+                    seen.add(identity)
+            websocket.send(json.dumps({"type": "heartbeat"}))
+            time.sleep(max(3, int(os.getenv("LIVE_LOG_SECONDS", "5"))))
         except Exception as exc:
             websocket.send(json.dumps({"error": str(exc)[:240]}))
             time.sleep(8)
