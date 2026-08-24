@@ -74,6 +74,16 @@ const TLP_META = {
   'TLP:CLEAR': { label: 'TLP:CLEAR', color: '#92a4b7', tone: 'clear' },
 };
 
+const FAMILY_COLORS = {
+  Benign: '#3ab795',
+  DDoS: '#e85d75',
+  DoS: '#f28c6f',
+  MQTT: '#61b4d8',
+  Recon: '#d7b46a',
+  Spoofing: '#9d83d5',
+  Unknown: '#92a4b7',
+};
+
 const DEFAULT_FILTERS = {
   category: 'ALL',
   tlp: 'ALL',
@@ -422,6 +432,13 @@ export default function Dashboard({ onLogout }) {
     backend: 'loading',
     counts: {},
   });
+  const [modelInfo, setModelInfo] = useState({
+    model_name: 'CICIoMT2024 CatBoost',
+    features: [],
+    classes: [],
+    metrics: {},
+    feature_importance: [],
+  });
   const [posture, setPosture] = useState({
     state: 'pending',
     packages_scanned: 0,
@@ -506,12 +523,13 @@ export default function Dashboard({ onLogout }) {
       if (forceRefresh) {
         await fetch(`${API_BASE_URL}/api/vulnerabilities/refresh`, { method: 'POST' });
       }
-      const [statusResponse, postureResponse, alertsResponse, databaseResponse, investigationsResponse] = await Promise.all([
+      const [statusResponse, postureResponse, alertsResponse, databaseResponse, investigationsResponse, modelResponse] = await Promise.all([
         fetch(`${API_BASE_URL}/api/intelligence/status`),
         fetch(`${API_BASE_URL}/api/vulnerabilities/posture`),
         fetch(`${API_BASE_URL}/api/alerts?limit=4`),
         fetch(`${API_BASE_URL}/api/database/status`),
         fetch(`${API_BASE_URL}/api/investigations?limit=${MAX_LOGS}`),
+        fetch(`${API_BASE_URL}/api/model`),
       ]);
       if (statusResponse.ok) {
         const statusPayload = await statusResponse.json();
@@ -532,6 +550,9 @@ export default function Dashboard({ onLogout }) {
         const persistedLogs = mergeLogWindow(investigationPayload.investigations || []);
         setLogs(persistedLogs);
         localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(persistedLogs));
+      }
+      if (modelResponse.ok) {
+        setModelInfo(await modelResponse.json());
       }
     } catch {
       const offlineSource = { status: 'error' };
@@ -562,6 +583,8 @@ export default function Dashboard({ onLogout }) {
         acc.threats += isThreat ? 1 : 0;
         acc.safe += isThreat ? 0 : 1;
         acc.otxMatches += log.is_in_otx ? 1 : 0;
+        const family = String(log.traffic_class || 'Unknown');
+        acc.families[family] = (acc.families[family] || 0) + 1;
         acc.volume += log.data_mb;
         acc.categories[log.category] = (acc.categories[log.category] || 0) + 1;
         acc.tlp[log.tlp] = (acc.tlp[log.tlp] || 0) + 1;
@@ -575,6 +598,7 @@ export default function Dashboard({ onLogout }) {
         volume: 0,
         categories: {},
         tlp: {},
+        families: {},
       },
     );
 
@@ -583,6 +607,18 @@ export default function Dashboard({ onLogout }) {
       riskScore: totals.total ? Math.round((totals.threats / totals.total) * 100) : 0,
     };
   }, [logs]);
+
+  const familyData = useMemo(
+    () =>
+      Object.entries(stats.families)
+        .map(([name, value]) => ({ name, value, color: FAMILY_COLORS[name] || FAMILY_COLORS.Unknown }))
+        .sort((a, b) => b.value - a.value),
+    [stats.families],
+  );
+
+  const modelMetrics = modelInfo.metrics || {};
+  const featureImportance = (modelInfo.feature_importance || []).slice(0, 8);
+  const maxFeatureImportance = featureImportance[0]?.importance || 1;
 
   const filteredLogs = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
@@ -623,16 +659,6 @@ export default function Dashboard({ onLogout }) {
     [logs],
   );
 
-  const tlpData = useMemo(
-    () =>
-      Object.entries(TLP_META).map(([key, meta]) => ({
-        name: meta.label,
-        value: stats.tlp[key] || 0,
-        color: meta.color,
-      })),
-    [stats.tlp],
-  );
-
   const categoryData = Object.entries(CATEGORY_META).map(([key, meta]) => ({
     key,
     ...meta,
@@ -640,9 +666,9 @@ export default function Dashboard({ onLogout }) {
   }));
 
   const connectionMeta = {
-    live: { label: 'Live connected', icon: Signal },
-    connecting: { label: 'Connecting', icon: Radio },
-    offline: { label: 'Reconnecting', icon: WifiOff },
+    live: { label: 'Live event stream', icon: Signal },
+    connecting: { label: 'Connecting stream', icon: Radio },
+    offline: { label: 'Stream reconnecting', icon: WifiOff },
   }[connectionStatus];
 
   const updateFilter = (key, value) => {
@@ -681,7 +707,7 @@ export default function Dashboard({ onLogout }) {
 
   const runIntegrationSample = async () => {
     setIntegrationLoading(true);
-    setIntegrationMessage('Running CatBoost and four live intelligence sources...');
+    setIntegrationMessage('Running the external test fixture through CatBoost, then querying four CTI sources...');
     try {
       const response = await fetch(`${API_BASE_URL}/api/integration-sample/run`, {
         method: 'POST',
@@ -736,7 +762,11 @@ export default function Dashboard({ onLogout }) {
           </a>
           <a href="#traffic">
             <Radio size={18} />
-            Live Traffic
+            Live Stream
+          </a>
+          <a href="#model-eda">
+            <Cpu size={18} />
+            Model & EDA
           </a>
           <a href="#intelligence">
             <Globe2 size={18} />
@@ -749,17 +779,17 @@ export default function Dashboard({ onLogout }) {
         </nav>
 
         <div className="side-status">
-          <span>Fusion engine</span>
-          <strong>ML + four live sources</strong>
-          <p>Scores hospital logs with independent OSV, NVD, OTX, and VirusTotal evidence.</p>
+          <span>Detection pipeline</span>
+          <strong>CatBoost IDS + 4 CTI APIs</strong>
+          <p>CatBoost classifies 12 flow features. OSV, NVD, OTX, and VirusTotal then enrich matching indicators.</p>
         </div>
       </aside>
 
       <main className="soc-main">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Real-time hospital security logs</p>
-            <h1>Threat operations dashboard</h1>
+            <p className="eyebrow">Live healthcare security monitoring</p>
+            <h1>Detection, intelligence & response</h1>
           </div>
           <div className="topbar-actions">
             <button
@@ -767,10 +797,10 @@ export default function Dashboard({ onLogout }) {
               type="button"
               onClick={runIntegrationSample}
               disabled={integrationLoading}
-              title="Run the downloaded incident sample through CatBoost, OTX, VirusTotal, NVD, and OSV"
+              title="Run the bundled external test fixture through CatBoost, then enrich its indicators with OTX, VirusTotal, NVD, and OSV"
             >
               <Activity className={integrationLoading ? 'spin' : ''} size={17} />
-              {integrationLoading ? 'Analyzing...' : 'Test AI + 4 sources'}
+              {integrationLoading ? 'Analyzing...' : 'Run end-to-end test'}
             </button>
             <div className={`connection-pill ${connectionStatus}`}>
               <ConnectionIcon size={16} />
@@ -799,32 +829,68 @@ export default function Dashboard({ onLogout }) {
           <div>
             <div className="hero-title-row">
               <span className="pulse-dot" aria-hidden="true" />
-              <span>{lastSeen ? `Last event ${lastSeen.toLocaleTimeString()}` : 'Waiting for live feed'}</span>
+              <span>{lastSeen ? `Stream heartbeat ${lastSeen.toLocaleTimeString()}` : 'Waiting for event stream'}</span>
             </div>
-            <h2>Hospital traffic risk is currently {stats.riskScore}% across the persisted event window.</h2>
+            <h2>{stats.threats} of {stats.total} stored investigations are currently classified as threats.</h2>
             <p>
-              The console blends a trained healthcare log model with live OSV, NVD, AlienVault OTX, and
-              VirusTotal evidence. Every score keeps its source evidence visible for analyst review.
+              Stage 1 uses the trained CatBoost IDS to classify network-flow behavior. Stage 2 queries OSV,
+              NVD, AlienVault OTX, and VirusTotal for independent evidence before producing risk and response actions.
             </p>
           </div>
           <div className="risk-meter" style={{ '--risk': stats.riskScore }} aria-label={`Risk score ${stats.riskScore} percent`}>
             <span>{stats.riskScore}</span>
-            <small>% risk</small>
+            <small>% threat ratio</small>
           </div>
         </section>
 
         <section className="metric-grid" aria-label="Security metrics">
-          <MetricCard icon={ShieldAlert} label="Threat Events" value={stats.threats} accent="#e85d75" helper={`${stats.otxMatches} OTX checks`} />
-          <MetricCard icon={ShieldCheck} label="Safe Traffic" value={stats.safe} accent="#3ab795" helper={`${stats.total} total events`} />
-          <MetricCard icon={Bell} label="Observed Categories" value={categoryData.filter((item) => item.count > 0).length} accent="#61b4d8" helper="Patient, employee, and device logs" />
-          <MetricCard icon={Database} label="Persisted Events" value={databaseStatus.counts?.hospital_events || stats.total} accent="#d7b46a" helper="Supabase investigations" />
+          <MetricCard icon={ShieldAlert} label="Threat Predictions" value={stats.threats} accent="#e85d75" helper={`${databaseStatus.counts?.cti_lookup_results || 0} CTI evidence records`} />
+          <MetricCard icon={ShieldCheck} label="Benign / Safe" value={stats.safe} accent="#3ab795" helper="No alert in stored window" />
+          <MetricCard icon={Bell} label="Detected Families" value={Object.keys(stats.families).length} accent="#61b4d8" helper={`${modelInfo.classes?.length || 6} trained classes`} />
+          <MetricCard icon={Database} label="Stored Investigations" value={databaseStatus.counts?.hospital_events || stats.total} accent="#d7b46a" helper="Supabase PostgreSQL" />
+        </section>
+
+        <section className="model-eda surface" id="model-eda" aria-label="Model validation and exploratory data analysis">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Model validation & EDA</p>
+              <h2>CatBoost performance and feature interpretation</h2>
+              <p className="section-description">Held-out CICIoMT2024 test metrics and the feature importance learned by the deployed artifact.</p>
+            </div>
+            <span className="model-badge">CatBoost · {modelInfo.features?.length || 12} features</span>
+          </div>
+          <div className="eda-grid">
+            <div className="validation-panel">
+              <div className="validation-metrics">
+                <ValidationMetric label="Accuracy" value={modelMetrics.accuracy} />
+                <ValidationMetric label="Balanced accuracy" value={modelMetrics.balanced_accuracy} />
+                <ValidationMetric label="Macro F1" value={modelMetrics.macro_f1} />
+                <ValidationMetric label="Weighted F1" value={modelMetrics.weighted_f1} />
+              </div>
+              <div className="pipeline-explainer">
+                <div><span>1</span><strong>Detect</strong><p>CatBoost classifies 12 numeric flow features.</p></div>
+                <div><span>2</span><strong>Enrich</strong><p>Four CTI APIs check relevant IoCs, CVEs, and packages.</p></div>
+                <div><span>3</span><strong>Respond</strong><p>Risk fusion creates an alert and recommended actions.</p></div>
+              </div>
+            </div>
+            <div className="feature-panel">
+              <div className="panel-heading"><strong>Top feature importance</strong><span>Model explainability</span></div>
+              {featureImportance.map((item) => (
+                <div className="feature-row" key={item.feature}>
+                  <div><span>{item.feature}</span><em>{Number(item.importance).toFixed(1)}%</em></div>
+                  <i style={{ width: `${Math.max(4, (item.importance / maxFeatureImportance) * 100)}%` }} />
+                </div>
+              ))}
+            </div>
+          </div>
         </section>
 
         <section className="intelligence-surface surface" id="intelligence" aria-label="Live intelligence sources">
           <div className="section-heading intelligence-heading">
             <div>
-              <p className="eyebrow">Evidence plane</p>
-              <h2>Live intelligence and dependency posture</h2>
+              <p className="eyebrow">Live CTI enrichment</p>
+              <h2>Four-source intelligence status</h2>
+              <p className="section-description">Sources are queried on demand when an event contains a supported public indicator.</p>
             </div>
             <button
               className="soft-button"
@@ -833,7 +899,7 @@ export default function Dashboard({ onLogout }) {
               disabled={intelligenceLoading}
             >
               <RefreshCw className={intelligenceLoading ? 'spin' : ''} size={16} />
-              {intelligenceLoading ? 'Refreshing' : 'Refresh scan'}
+              {intelligenceLoading ? 'Refreshing' : 'Scan dependencies'}
             </button>
           </div>
 
@@ -864,34 +930,30 @@ export default function Dashboard({ onLogout }) {
             />
           </div>
 
-          <div className="posture-strip">
+          <div className="posture-strip architecture-strip">
+            <div>
+              <span>Detection model</span>
+              <strong>CatBoost multiclass</strong>
+            </div>
+            <div>
+              <span>Input schema</span>
+              <strong>{modelInfo.features?.length || 12} flow features</strong>
+            </div>
+            <div>
+              <span>Attack classes</span>
+              <strong>{modelInfo.classes?.length || 6} classes</strong>
+            </div>
+            <div>
+              <span>CTI evidence</span>
+              <strong>{databaseStatus.counts?.cti_lookup_results || 0} records</strong>
+            </div>
+            <div>
+              <span>Alert queue</span>
+              <strong>{databaseStatus.counts?.alerts || 0} alerts</strong>
+            </div>
             <div>
               <span>Database</span>
-              <strong>{databaseStatus.backend} · {databaseStatus.counts?.alerts || 0} alerts</strong>
-            </div>
-            <div>
-              <span>Scan state</span>
-              <strong>{posture.state || 'pending'}</strong>
-            </div>
-            <div>
-              <span>Packages</span>
-              <strong>{posture.packages_scanned || 0}</strong>
-            </div>
-            <div>
-              <span>Findings</span>
-              <strong>{posture.vulnerability_count || 0}</strong>
-            </div>
-            <div>
-              <span>Critical</span>
-              <strong>{posture.critical_count || 0}</strong>
-            </div>
-            <div>
-              <span>Known exploited</span>
-              <strong>{posture.known_exploited_count || 0}</strong>
-            </div>
-            <div>
-              <span>Max CVSS</span>
-              <strong>{Number(posture.max_cvss || 0).toFixed(1)}</strong>
+              <strong>{databaseStatus.backend === 'postgresql' ? 'Supabase PostgreSQL' : databaseStatus.backend}</strong>
             </div>
           </div>
           <div className="analyst-queue" aria-label="Persisted analyst alert queue">
@@ -918,7 +980,9 @@ export default function Dashboard({ onLogout }) {
               <p className="analyst-empty">No persisted alerts meet the review threshold yet.</p>
             )}
           </div>
-          {posture.message && <p className="posture-message">{posture.message}</p>}
+          <p className="posture-message">
+            Optional dependency scan: {posture.state || 'pending'} · {posture.packages_scanned || 0} packages · {posture.vulnerability_count || 0} findings · max CVSS {Number(posture.max_cvss || 0).toFixed(1)}
+          </p>
         </section>
 
         <section className="analytics-grid" aria-label="Traffic analytics">
@@ -954,16 +1018,16 @@ export default function Dashboard({ onLogout }) {
           <div className="surface">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">Handling labels</p>
-                <h2>TLP distribution</h2>
+                <p className="eyebrow">Live EDA</p>
+                <h2>Detected family distribution</h2>
               </div>
               <AlertTriangle size={18} />
             </div>
             <div className="pie-layout">
               <ResponsiveContainer width="52%" height={220}>
                 <PieChart>
-                  <Pie data={tlpData} dataKey="value" nameKey="name" innerRadius={56} outerRadius={88} paddingAngle={3}>
-                    {tlpData.map((entry) => (
+                  <Pie data={familyData} dataKey="value" nameKey="name" innerRadius={56} outerRadius={88} paddingAngle={3}>
+                    {familyData.map((entry) => (
                       <Cell key={entry.name} fill={entry.color} />
                     ))}
                   </Pie>
@@ -971,7 +1035,7 @@ export default function Dashboard({ onLogout }) {
                 </PieChart>
               </ResponsiveContainer>
               <div className="tlp-legend">
-                {tlpData.map((entry) => (
+                {familyData.map((entry) => (
                   <div key={entry.name}>
                     <span style={{ backgroundColor: entry.color }} />
                     <strong>{entry.name}</strong>
@@ -1108,11 +1172,21 @@ function MetricCard({ icon: Icon, label, value, accent, helper }) {
   );
 }
 
+function ValidationMetric({ label, value }) {
+  const normalized = Number(value);
+  return (
+    <div className="validation-metric">
+      <span>{label}</span>
+      <strong>{Number.isFinite(normalized) ? `${(normalized * 100).toFixed(1)}%` : 'Loading'}</strong>
+    </div>
+  );
+}
+
 function SourceCard({ icon: Icon, label, detail, source }) {
   const status = source?.status || 'pending';
   const statusLabel = {
-    live: 'Live',
-    ready: 'Ready',
+    live: 'Live · query successful',
+    ready: 'Live API ready',
     needs_key: 'API key needed',
     error: 'Unavailable',
     pending: 'Checking',

@@ -78,6 +78,15 @@ class CatBoostIDSService:
             for key, value in (artifact.get("metrics") or {}).items()
             if isinstance(value, (int, float, np.number))
         }
+        feature_importance: list[dict[str, Any]] = []
+        if hasattr(self.model, "get_feature_importance"):
+            raw_importance = np.asarray(self.model.get_feature_importance()).reshape(-1)
+            feature_importance = [
+                {"feature": feature, "importance": round(float(raw_importance[index]), 6)}
+                for index, feature in enumerate(self.features)
+                if index < len(raw_importance)
+            ]
+            feature_importance.sort(key=lambda row: row["importance"], reverse=True)
         self.metadata = {
             "status": "trained",
             "artifact": str(self.artifact_path),
@@ -85,6 +94,7 @@ class CatBoostIDSService:
             "features": self.features,
             "classes": self.classes,
             "metrics": self.metrics,
+            "feature_importance": feature_importance,
             "excluded_family": artifact.get("excluded_family"),
             "profile_train_files": len(artifact.get("profile_train_files") or []),
             "profile_holdout_files": len(artifact.get("profile_holdout_files") or []),

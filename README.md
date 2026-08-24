@@ -153,8 +153,8 @@ Start the complete website:
 .\.venv\Scripts\python.exe flask_app.py
 ```
 
-Open `http://127.0.0.1:8000`. Use **Test AI + 4 sources** in the top bar to
-run the included unseen CICIoT2023 event through CatBoost and, in the same
+Open `http://127.0.0.1:8000`. Use **Run end-to-end test** in the top bar to
+run the bundled unseen CICIoT2023 fixture through CatBoost and, in the same
 investigation, query AlienVault OTX, VirusTotal, OSV, and NIST NVD. The result
 contains the predicted attack family, confidence, provider evidence, fused risk
 score, and deterministic response recommendations.
