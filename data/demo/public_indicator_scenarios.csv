@@ -1,0 +1,4 @@
+event_id,indicator_type,indicator,source_ip,destination_ip,src_port,dst_port,total_bytes,total_packets,attack_category,label,scenario_note
+DEMO-IOC-001,ipv4,8.8.8.8,8.8.8.8,10.0.1.150,443,1111,682,7,public_ip_reputation_check,0,Safe public IP control used to demonstrate a live reputation lookup.
+DEMO-IOC-002,domain,example.com,10.0.1.172,10.0.1.150,51514,443,1024,9,public_domain_reputation_check,0,Safe public domain control used to demonstrate a live reputation lookup.
+DEMO-IOC-003,md5,44d88612fea8a8f36de82e1278abb02f,10.0.1.172,10.0.1.150,51515,445,4096,18,malware_signature_test,1,Harmless EICAR antivirus test-signature hash only; no executable file is included.

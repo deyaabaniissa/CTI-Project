@@ -1,0 +1,61 @@
+name: healthcare-cti-soc
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: healthcare_cti
+      POSTGRES_USER: healthcare_cti
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-cti-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U healthcare_cti -d healthcare_cti"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  web:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://healthcare_cti:${POSTGRES_PASSWORD:-local-cti-change-me}@db:5432/healthcare_cti
+      SITE_DATABASE_URL: postgresql+psycopg://healthcare_cti:${POSTGRES_PASSWORD:-local-cti-change-me}@db:5432/healthcare_cti
+      OTX_API_KEY: ${OTX_API_KEY:-}
+      VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
+      NVD_API_KEY: ${NVD_API_KEY:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@hospital.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+      DEV_OTP_CODE: ${DEV_OTP_CODE:-123456}
+      FLASK_DEBUG: "false"
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      retries: 8
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@hospital.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-pgadmin-change-me}
+    ports:
+      - "127.0.0.1:5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+volumes:
+  postgres_data:
+  pgadmin_data:

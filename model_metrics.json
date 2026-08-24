@@ -1,0 +1,294 @@
+{
+  "trained_at": "2026-08-01T19:27:48.748876+00:00",
+  "algorithm": "Three source-specific OneHotEncoder + balanced RandomForest classifiers",
+  "label_source": "Rule engine v1 (synthetic; pending human validation)",
+  "label_classes": [
+    "benign",
+    "suspicious",
+    "threat"
+  ],
+  "features": [
+    "log_type",
+    "location",
+    "department",
+    "actor_role",
+    "action",
+    "object_type",
+    "device_type",
+    "protocol",
+    "severity",
+    "status",
+    "hour",
+    "day_of_week",
+    "source_port",
+    "dest_port"
+  ],
+  "excluded_fields": [
+    "patient_id",
+    "accessed_by_employee_id",
+    "employee_id",
+    "employee_name",
+    "device_id",
+    "workstation_id",
+    "description",
+    "ip_address",
+    "source_ip",
+    "destination_ip",
+    "threat_db_match",
+    "source_db_match_label",
+    "threat_source",
+    "threat_reference_id",
+    "indicator",
+    "synthetic_label",
+    "synthetic_attack_type",
+    "synthetic_confidence",
+    "label_rule_id",
+    "label_reason",
+    "rule_risk_score",
+    "label_source",
+    "analyst_label",
+    "analyst_attack_type",
+    "analyst_confidence",
+    "analyst_reason",
+    "review_status",
+    "reviewed_by",
+    "reviewed_at"
+  ],
+  "targets": {
+    "threat_recall": 0.85,
+    "threat_precision": 0.7,
+    "max_threat_false_positive_rate": 0.1
+  },
+  "models": {
+    "employee_activity": {
+      "name": "Employee-activity model",
+      "log_type": "employee_activity",
+      "training_rows": 7500,
+      "test_rows": 2500,
+      "evaluation_split": "chronological final 25% holdout",
+      "train_period": [
+        "2026-01-01T00:05:29",
+        "2026-06-07T09:39:57"
+      ],
+      "test_period": [
+        "2026-06-07T09:40:49",
+        "2026-07-31T23:51:33"
+      ],
+      "class_distribution": {
+        "suspicious": 7776,
+        "benign": 1513,
+        "threat": 711
+      },
+      "accuracy": 0.9964,
+      "balanced_accuracy": 0.99846,
+      "macro_f1": 0.99144,
+      "macro_roc_auc": 1.0,
+      "threat_precision": 0.95431,
+      "threat_recall": 1.0,
+      "threat_pr_auc": 1.0,
+      "threat_false_positive_rate": 0.00389,
+      "per_class": {
+        "benign": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 365
+        },
+        "suspicious": {
+          "precision": 1.0,
+          "recall": 0.99538,
+          "f1": 0.99768,
+          "support": 1947
+        },
+        "threat": {
+          "precision": 0.95431,
+          "recall": 1.0,
+          "f1": 0.97662,
+          "support": 188
+        }
+      },
+      "confusion_matrix": {
+        "benign": {
+          "benign": 365,
+          "suspicious": 0,
+          "threat": 0
+        },
+        "suspicious": {
+          "benign": 0,
+          "suspicious": 1938,
+          "threat": 9
+        },
+        "threat": {
+          "benign": 0,
+          "suspicious": 0,
+          "threat": 188
+        }
+      },
+      "target_checks": {
+        "threat_recall_at_least_85_percent": true,
+        "threat_precision_at_least_70_percent": true,
+        "threat_false_positive_rate_at_most_10_percent": true
+      }
+    },
+    "patient_access": {
+      "name": "Patient-access model",
+      "log_type": "patient_access",
+      "training_rows": 7500,
+      "test_rows": 2500,
+      "evaluation_split": "chronological final 25% holdout",
+      "train_period": [
+        "2026-01-01T00:31:01",
+        "2026-06-09T16:24:14"
+      ],
+      "test_period": [
+        "2026-06-09T16:26:54",
+        "2026-07-31T23:48:39"
+      ],
+      "class_distribution": {
+        "threat": 3620,
+        "benign": 3243,
+        "suspicious": 3137
+      },
+      "accuracy": 1.0,
+      "balanced_accuracy": 1.0,
+      "macro_f1": 1.0,
+      "macro_roc_auc": 1.0,
+      "threat_precision": 1.0,
+      "threat_recall": 1.0,
+      "threat_pr_auc": 1.0,
+      "threat_false_positive_rate": 0.0,
+      "per_class": {
+        "benign": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 812
+        },
+        "suspicious": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 796
+        },
+        "threat": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 892
+        }
+      },
+      "confusion_matrix": {
+        "benign": {
+          "benign": 812,
+          "suspicious": 0,
+          "threat": 0
+        },
+        "suspicious": {
+          "benign": 0,
+          "suspicious": 796,
+          "threat": 0
+        },
+        "threat": {
+          "benign": 0,
+          "suspicious": 0,
+          "threat": 892
+        }
+      },
+      "target_checks": {
+        "threat_recall_at_least_85_percent": true,
+        "threat_precision_at_least_70_percent": true,
+        "threat_false_positive_rate_at_most_10_percent": true
+      }
+    },
+    "system_device": {
+      "name": "System/device model",
+      "log_type": "system_device",
+      "training_rows": 7500,
+      "test_rows": 2500,
+      "evaluation_split": "chronological final 25% holdout",
+      "train_period": [
+        "2026-01-01T00:47:51",
+        "2026-06-09T17:08:39"
+      ],
+      "test_period": [
+        "2026-06-09T17:23:24",
+        "2026-07-31T22:42:44"
+      ],
+      "class_distribution": {
+        "benign": 3984,
+        "suspicious": 3850,
+        "threat": 2166
+      },
+      "accuracy": 0.9996,
+      "balanced_accuracy": 0.99967,
+      "macro_f1": 0.99966,
+      "macro_roc_auc": 1.0,
+      "threat_precision": 1.0,
+      "threat_recall": 1.0,
+      "threat_pr_auc": 1.0,
+      "threat_false_positive_rate": 0.0,
+      "per_class": {
+        "benign": {
+          "precision": 0.99899,
+          "recall": 1.0,
+          "f1": 0.99949,
+          "support": 985
+        },
+        "suspicious": {
+          "precision": 1.0,
+          "recall": 0.999,
+          "f1": 0.9995,
+          "support": 1002
+        },
+        "threat": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 513
+        }
+      },
+      "confusion_matrix": {
+        "benign": {
+          "benign": 985,
+          "suspicious": 0,
+          "threat": 0
+        },
+        "suspicious": {
+          "benign": 1,
+          "suspicious": 1001,
+          "threat": 0
+        },
+        "threat": {
+          "benign": 0,
+          "suspicious": 0,
+          "threat": 513
+        }
+      },
+      "target_checks": {
+        "threat_recall_at_least_85_percent": true,
+        "threat_precision_at_least_70_percent": true,
+        "threat_false_positive_rate_at_most_10_percent": true
+      }
+    }
+  },
+  "aggregate": {
+    "test_rows": 7500,
+    "accuracy": 0.99867,
+    "balanced_accuracy": 0.99911,
+    "macro_f1": 0.99854,
+    "threat_precision": 0.99438,
+    "threat_recall": 1.0,
+    "threat_false_positive_rate": 0.00152,
+    "target_checks": {
+      "threat_recall_at_least_85_percent": true,
+      "threat_precision_at_least_70_percent": true,
+      "threat_false_positive_rate_at_most_10_percent": true
+    }
+  },
+  "human_validation": {
+    "status": "required",
+    "review_sample_rows": 3000,
+    "minimum_acceptance": "Repeat evaluation after analysts complete the review workbook; synthetic-rule performance is not production validation."
+  },
+  "evaluation_note": "These models measure how well observable fields reproduce transparent synthetic rules. High scores demonstrate implementation consistency, not real-world hospital threat-detection accuracy. Operational approval requires independently reviewed labels and a newly untouched test set."
+}

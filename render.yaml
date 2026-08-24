@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: healthcare-cti-soc
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: SUPABASE_DB_HOST
+        value: aws-0-ap-southeast-1.pooler.supabase.com
+      - key: SUPABASE_DB_PORT
+        value: "5432"
+      - key: SUPABASE_DB_NAME
+        value: postgres
+      - key: SUPABASE_DB_USER
+        value: postgres.mcnwmszykwnanedfpfso
+      - key: SUPABASE_DB_PASSWORD
+        sync: false
+      - key: OTX_API_KEY
+        sync: false
+      - key: VIRUSTOTAL_API_KEY
+        sync: false
+      - key: NVD_API_KEY
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DEV_OTP_CODE
+        sync: false
+      - key: OTP_TTL_SECONDS
+        value: "300"

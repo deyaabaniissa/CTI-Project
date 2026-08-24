@@ -8,10 +8,12 @@ import {
   ChevronDown,
   Clock3,
   Cpu,
+  Database,
   Download,
   Eye,
   FileText,
-  HeartPulse,
+  Fingerprint,
+  Globe2,
   Hospital,
   LogOut,
   Radio,
@@ -23,7 +25,6 @@ import {
   Trash2,
   WifiOff,
   X,
-  Zap,
 } from 'lucide-react';
 import {
   Area,
@@ -38,14 +39,32 @@ import {
 } from 'recharts';
 import './dashboard.css';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8000/ws/live-logs';
-const LOG_STORAGE_KEY = 'healthcare_soc_logs_v4';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const WS_URL =
+  import.meta.env.VITE_WS_URL ||
+  `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/live-logs`;
+const LOG_STORAGE_KEY = 'healthcare_soc_logs_v8';
 const MAX_LOGS = 120;
+const PROVIDER_ORDER = ['otx', 'virustotal', 'osv', 'nvd'];
+const PROVIDER_NAMES = {
+  otx: 'AlienVault OTX',
+  virustotal: 'VirusTotal',
+  osv: 'OSV',
+  nvd: 'NIST NVD',
+};
+const DEDICATED_REPORT_FIELDS = new Set([
+  'indicator_evidence',
+  'provider_evidence',
+  'recommended_actions',
+  'recommendation_method',
+  'risk_reasons',
+  'vulnerability_posture',
+]);
 
 const CATEGORY_META = {
-  Attack: { label: 'Attack', icon: Zap, color: '#e85d75' },
-  environmentMonitoring: { label: 'Environment', icon: Cpu, color: '#e6a23c' },
-  patientMonitoring: { label: 'Patient Devices', icon: HeartPulse, color: '#3ab795' },
+  'Patient access logs': { label: 'Patient access', icon: Eye, color: '#61b4d8' },
+  'Employee activity logs': { label: 'Employee activity', icon: Activity, color: '#e6a23c' },
+  'System and device logs': { label: 'Systems & devices', icon: Cpu, color: '#e85d75' },
 };
 
 const TLP_META = {
@@ -73,6 +92,11 @@ const loadSavedLogs = () => {
   }
 };
 
+const toFiniteNumber = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
 const normalizeLog = (log) => ({
   ...log,
   log_id: String(log.log_id || `LOG-${Date.now()}`),
@@ -80,9 +104,13 @@ const normalizeLog = (log) => ({
   department: String(log.department || 'General'),
   destination_target: String(log.destination_target || '0.0.0.0'),
   source_ip: String(log.source_ip || '0.0.0.0'),
-  data_mb: Number(log.data_mb || 0),
-  is_threat: Number(log.is_threat || 0),
+  data_mb: toFiniteNumber(log.data_mb),
+  is_threat: toFiniteNumber(log.is_threat),
   is_in_otx: Boolean(log.is_in_otx),
+  risk_level: String(log.risk_level || 'low'),
+  risk_probability: toFiniteNumber(log.risk_probability),
+  model_probability: toFiniteNumber(log.model_probability),
+  intel_verdict: String(log.intel_verdict || 'unknown'),
   tlp: String(log.tlp || 'TLP:CLEAR'),
   timestamp: String(log.timestamp || new Date().toLocaleTimeString('en-GB')),
   date: String(log.date || new Date().toISOString().slice(0, 10)),
@@ -133,6 +161,31 @@ const formatReportLabel = (key) =>
 
 const getLogThreatStatus = (log) => (log.is_threat === 1 || log.tlp === 'TLP:RED' || log.is_in_otx ? 'Threat' : 'Safe');
 
+const getProviderRows = (log) => {
+  const supplied = new Map(
+    (Array.isArray(log.provider_evidence) ? log.provider_evidence : []).map((item) => [item.provider_id, item]),
+  );
+  return PROVIDER_ORDER.map((providerId) => supplied.get(providerId) || {
+    provider_id: providerId,
+    provider: PROVIDER_NAMES[providerId],
+    configured: false,
+    applicable: false,
+    queried: false,
+    available: false,
+    status: 'not_recorded',
+    result: 'No per-event provider result is attached to this legacy log.',
+  });
+};
+
+const providerStatusLabel = (provider) => {
+  if (provider.status === 'available') return 'Queried — available';
+  if (provider.status === 'not_applicable') return 'Not applicable';
+  if (provider.status === 'not_configured') return 'Applicable — not configured';
+  if (provider.status === 'not_queried') return 'Applicable — not queried';
+  if (provider.status === 'unavailable') return 'Queried — unavailable';
+  return 'Not recorded';
+};
+
 const getReportRows = (log) => {
   const preferredOrder = [
     'log_id',
@@ -147,6 +200,10 @@ const getReportRows = (log) => {
     'data_unit',
     'is_threat',
     'is_in_otx',
+    'risk_level',
+    'risk_probability',
+    'model_probability',
+    'intel_verdict',
     'tlp',
   ];
   const seen = new Set();
@@ -160,7 +217,7 @@ const getReportRows = (log) => {
   });
 
   Object.entries(log).forEach(([key, value]) => {
-    if (!seen.has(key)) {
+    if (!seen.has(key) && !DEDICATED_REPORT_FIELDS.has(key) && (value === null || typeof value !== 'object')) {
       rows.push([formatReportLabel(key), value]);
     }
   });
@@ -169,33 +226,47 @@ const getReportRows = (log) => {
 };
 
 const getReportRecommendations = (log) => {
+  if (Array.isArray(log.recommended_actions) && log.recommended_actions.length) {
+    return log.recommended_actions.map((item) => ({
+      priority: String(item.priority || 'Review'),
+      action: String(item.action || ''),
+      problem: String(item.problem || ''),
+      evidenceSources: Array.isArray(item.evidence_sources) ? item.evidence_sources.map(String) : [],
+      evidence: String(item.evidence || ''),
+    }));
+  }
+
+  let fallback;
   if (log.tlp === 'TLP:RED' || log.is_in_otx) {
-    return [
+    fallback = [
       'Escalate to the incident response owner immediately.',
       'Validate source and destination assets before allowing continued communication.',
       'Preserve related telemetry and attach this report to the incident record.',
     ];
-  }
-
-  if (log.tlp === 'TLP:AMBER' || log.is_threat === 1) {
-    return [
+  } else if (log.tlp === 'TLP:AMBER' || log.is_threat === 1) {
+    fallback = [
       'Review the event with the responsible department.',
       'Correlate with endpoint and firewall telemetry for the same time window.',
       'Keep sharing limited to the response team until the event is confirmed.',
     ];
-  }
-
-  if (log.tlp === 'TLP:GREEN') {
-    return [
+  } else if (log.tlp === 'TLP:GREEN') {
+    fallback = [
       'Monitor for repeated high-volume activity from the same assets.',
       'Share within trusted operational teams if needed for awareness.',
     ];
+  } else {
+    fallback = [
+      'No immediate action required.',
+      'Retain the report for audit history and baseline comparison.',
+    ];
   }
-
-  return [
-    'No immediate action required.',
-    'Retain the report for audit history and baseline comparison.',
-  ];
+  return fallback.map((action) => ({
+    priority: 'Legacy guidance',
+    action,
+    problem: 'This saved log predates per-provider report evidence.',
+    evidenceSources: ['Local dashboard policy'],
+    evidence: 'Generate a new live log to obtain API-linked recommendations.',
+  }));
 };
 
 const downloadTextFile = (filename, content, type = 'text/html;charset=utf-8') => {
@@ -217,9 +288,28 @@ const buildReportHtml = (log) => {
         `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(typeof value === 'boolean' ? (value ? 'Yes' : 'No') : value)}</td></tr>`,
     )
     .join('');
-  const recommendations = getReportRecommendations(log)
-    .map((item) => `<li>${escapeHtml(item)}</li>`)
+  const providerRows = getProviderRows(log)
+    .map(
+      (provider) => `<tr>
+        <td>${escapeHtml(provider.provider)}</td>
+        <td>${escapeHtml(providerStatusLabel(provider))}</td>
+        <td>${escapeHtml(provider.result)}</td>
+      </tr>`,
+    )
     .join('');
+  const recommendations = getReportRecommendations(log)
+    .map((item) => `<li>
+      <strong>[${escapeHtml(item.priority)}] ${escapeHtml(item.action)}</strong>
+      <div><b>Problem addressed:</b> ${escapeHtml(item.problem)}</div>
+      <div><b>Evidence:</b> ${escapeHtml(item.evidence)}</div>
+      <div><b>Sources:</b> ${escapeHtml(item.evidenceSources.join(', ') || 'Local policy')}</div>
+    </li>`)
+    .join('');
+  const reasons = (Array.isArray(log.risk_reasons) ? log.risk_reasons : [])
+    .map((reason) => `<li>${escapeHtml(reason)}</li>`)
+    .join('');
+  const posture = log.vulnerability_posture || {};
+  const postureSummary = `State ${posture.state || 'not recorded'}; ${toFiniteNumber(posture.packages_scanned)} packages scanned; ${toFiniteNumber(posture.vulnerability_count)} vulnerabilities; maximum CVSS ${toFiniteNumber(posture.max_cvss).toFixed(1)}.`;
 
   return `<!doctype html>
 <html lang="en">
@@ -245,6 +335,12 @@ const buildReportHtml = (log) => {
       th { width: 34%; background: #f6f9fb; }
       td { overflow-wrap: anywhere; }
       li { margin: 8px 0; }
+      .provider-table th { width: auto; }
+      .provider-table td:first-child { width: 20%; font-weight: 700; }
+      .provider-table td:nth-child(2) { width: 22%; }
+      .recommendations li { margin-bottom: 14px; }
+      .recommendations div { margin-top: 4px; }
+      .method-note { padding: 10px 12px; background: #f6f9fb; border-left: 3px solid #167f92; }
     </style>
   </head>
   <body>
@@ -263,8 +359,16 @@ const buildReportHtml = (log) => {
       </section>
       <h2>Log Details</h2>
       <table><tbody>${rows}</tbody></table>
-      <h2>Recommended Actions</h2>
-      <ul>${recommendations}</ul>
+      <h2>Four-Database Evidence</h2>
+      <table class="provider-table">
+        <thead><tr><th>Provider</th><th>Query status</th><th>API result for this log</th></tr></thead>
+        <tbody>${providerRows}</tbody>
+      </table>
+      <p><b>OSV/NVD dependency posture:</b> ${escapeHtml(postureSummary)}</p>
+      ${reasons ? `<h2>Decision Reasons</h2><ul>${reasons}</ul>` : ''}
+      <h2>Evidence-Linked Recommended Actions</h2>
+      <p class="method-note">${escapeHtml(log.recommendation_method || 'Recommendations are local policy guidance; verify before operational action.')}</p>
+      <ul class="recommendations">${recommendations}</ul>
     </main>
   </body>
 </html>`;
@@ -296,6 +400,24 @@ export default function Dashboard({ onLogout }) {
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [lastSeen, setLastSeen] = useState(null);
   const [selectedReportLog, setSelectedReportLog] = useState(null);
+  const [sourceStatus, setSourceStatus] = useState({});
+  const [analystAlerts, setAnalystAlerts] = useState([]);
+  const [databaseStatus, setDatabaseStatus] = useState({
+    status: 'pending',
+    backend: 'loading',
+    counts: {},
+  });
+  const [posture, setPosture] = useState({
+    state: 'pending',
+    packages_scanned: 0,
+    vulnerability_count: 0,
+    critical_count: 0,
+    known_exploited_count: 0,
+    max_cvss: 0,
+  });
+  const [intelligenceLoading, setIntelligenceLoading] = useState(false);
+  const [integrationLoading, setIntegrationLoading] = useState(false);
+  const [integrationMessage, setIntegrationMessage] = useState('');
   const reportRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const retryRef = useRef(0);
@@ -346,6 +468,53 @@ export default function Dashboard({ onLogout }) {
       window.clearTimeout(reconnectTimerRef.current);
       socket?.close();
     };
+  }, []);
+
+  const loadIntelligence = async (forceRefresh = false) => {
+    setIntelligenceLoading(true);
+    try {
+      if (forceRefresh) {
+        await fetch(`${API_BASE_URL}/api/vulnerabilities/refresh`, { method: 'POST' });
+      }
+      const [statusResponse, postureResponse, alertsResponse, databaseResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/intelligence/status`),
+        fetch(`${API_BASE_URL}/api/vulnerabilities/posture`),
+        fetch(`${API_BASE_URL}/api/alerts?limit=4`),
+        fetch(`${API_BASE_URL}/api/database/status`),
+      ]);
+      if (statusResponse.ok) {
+        const statusPayload = await statusResponse.json();
+        setSourceStatus(statusPayload.sources || {});
+      }
+      if (postureResponse.ok) {
+        setPosture(await postureResponse.json());
+      }
+      if (alertsResponse.ok) {
+        const alertPayload = await alertsResponse.json();
+        setAnalystAlerts(alertPayload.alerts || []);
+      }
+      if (databaseResponse.ok) {
+        setDatabaseStatus(await databaseResponse.json());
+      }
+    } catch {
+      const offlineSource = { status: 'error' };
+      setSourceStatus({
+        osv: offlineSource,
+        nvd: offlineSource,
+        otx: offlineSource,
+        virustotal: offlineSource,
+      });
+      setPosture((current) => ({ ...current, state: 'offline' }));
+      setDatabaseStatus({ status: 'offline', backend: 'offline', counts: {} });
+    } finally {
+      setIntelligenceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadIntelligence();
+    const intervalId = window.setInterval(() => loadIntelligence(), 30000);
+    return () => window.clearInterval(intervalId);
   }, []);
 
   const stats = useMemo(() => {
@@ -473,6 +642,37 @@ export default function Dashboard({ onLogout }) {
     wrapper.remove();
   };
 
+  const runIntegrationSample = async () => {
+    setIntegrationLoading(true);
+    setIntegrationMessage('Running CatBoost and four live intelligence sources...');
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/integration-sample/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || payload.detail || 'Integration test failed.');
+      }
+      const incomingLog = normalizeLog(payload.dashboard_log);
+      setLastSeen(new Date());
+      setLogs((current) => {
+        const updated = [incomingLog, ...current].slice(0, MAX_LOGS);
+        localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(updated));
+        return updated;
+      });
+      setSelectedReportLog(incomingLog);
+      setIntegrationMessage(
+        `Complete and stored: ${payload.result.prediction.predicted_family} at ${(payload.result.prediction.confidence * 100).toFixed(1)}% confidence; risk ${payload.result.risk_score}/100.`,
+      );
+      await loadIntelligence();
+    } catch (error) {
+      setIntegrationMessage(error.message || 'Integration test failed.');
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
   const hasActiveFilters =
     filters.category !== 'ALL' ||
     filters.tlp !== 'ALL' ||
@@ -501,6 +701,10 @@ export default function Dashboard({ onLogout }) {
             <Radio size={18} />
             Live Traffic
           </a>
+          <a href="#intelligence">
+            <Globe2 size={18} />
+            Intelligence
+          </a>
           <a href="#reports">
             <FileText size={18} />
             Reports
@@ -508,19 +712,29 @@ export default function Dashboard({ onLogout }) {
         </nav>
 
         <div className="side-status">
-          <span>Protocol</span>
-          <strong>TLP automation</strong>
-          <p>Classifies events by risk, OTX match, and packet context.</p>
+          <span>Fusion engine</span>
+          <strong>ML + four live sources</strong>
+          <p>Scores hospital logs with independent OSV, NVD, OTX, and VirusTotal evidence.</p>
         </div>
       </aside>
 
       <main className="soc-main">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Real-time hospital telemetry</p>
+            <p className="eyebrow">Real-time hospital security logs</p>
             <h1>Threat operations dashboard</h1>
           </div>
           <div className="topbar-actions">
+            <button
+              className="integration-button"
+              type="button"
+              onClick={runIntegrationSample}
+              disabled={integrationLoading}
+              title="Run the downloaded incident sample through CatBoost, OTX, VirusTotal, NVD, and OSV"
+            >
+              <Activity className={integrationLoading ? 'spin' : ''} size={17} />
+              {integrationLoading ? 'Analyzing...' : 'Test AI + 4 sources'}
+            </button>
             <div className={`connection-pill ${connectionStatus}`}>
               <ConnectionIcon size={16} />
               <span>{connectionMeta.label}</span>
@@ -538,6 +752,12 @@ export default function Dashboard({ onLogout }) {
           </div>
         </header>
 
+        {integrationMessage && (
+          <div className={`integration-message ${integrationMessage.startsWith('Complete') ? 'success' : ''}`} role="status">
+            {integrationMessage}
+          </div>
+        )}
+
         <section className="hero-band" id="overview">
           <div>
             <div className="hero-title-row">
@@ -546,8 +766,8 @@ export default function Dashboard({ onLogout }) {
             </div>
             <h2>Hospital traffic risk is currently {stats.riskScore}% across the local event window.</h2>
             <p>
-              The console blends MQTT telemetry, OTX indicator matching, and TLP handling into a single triage view for
-              patient safety and security operations.
+              The console blends a trained healthcare log model with live OSV, NVD, AlienVault OTX, and
+              VirusTotal evidence. Every score keeps its source evidence visible for analyst review.
             </p>
           </div>
           <div className="risk-meter" style={{ '--risk': stats.riskScore }} aria-label={`Risk score ${stats.riskScore} percent`}>
@@ -559,8 +779,109 @@ export default function Dashboard({ onLogout }) {
         <section className="metric-grid" aria-label="Security metrics">
           <MetricCard icon={ShieldAlert} label="Threat Events" value={stats.threats} accent="#e85d75" helper={`${stats.otxMatches} OTX matches`} />
           <MetricCard icon={ShieldCheck} label="Safe Traffic" value={stats.safe} accent="#3ab795" helper={`${stats.total} total events`} />
-          <MetricCard icon={Bell} label="Live Categories" value={categoryData.filter((item) => item.count > 0).length} accent="#61b4d8" helper="Attack, env, patient" />
+          <MetricCard icon={Bell} label="Live Categories" value={categoryData.filter((item) => item.count > 0).length} accent="#61b4d8" helper="Patient, employee, and device logs" />
           <MetricCard icon={Download} label="Observed Volume" value={stats.volume.toFixed(1)} accent="#d7b46a" helper="KB in saved window" />
+        </section>
+
+        <section className="intelligence-surface surface" id="intelligence" aria-label="Live intelligence sources">
+          <div className="section-heading intelligence-heading">
+            <div>
+              <p className="eyebrow">Evidence plane</p>
+              <h2>Live intelligence and dependency posture</h2>
+            </div>
+            <button
+              className="soft-button"
+              type="button"
+              onClick={() => loadIntelligence(true)}
+              disabled={intelligenceLoading}
+            >
+              <RefreshCw className={intelligenceLoading ? 'spin' : ''} size={16} />
+              {intelligenceLoading ? 'Refreshing' : 'Refresh scan'}
+            </button>
+          </div>
+
+          <div className="source-grid">
+            <SourceCard
+              icon={Database}
+              label="OSV"
+              detail="Dependency matching"
+              source={sourceStatus.osv}
+            />
+            <SourceCard
+              icon={Globe2}
+              label="NVD"
+              detail="CVSS and KEV metadata"
+              source={sourceStatus.nvd}
+            />
+            <SourceCard
+              icon={Radio}
+              label="AlienVault OTX"
+              detail="Community IoC pulses"
+              source={sourceStatus.otx}
+            />
+            <SourceCard
+              icon={Fingerprint}
+              label="VirusTotal"
+              detail="Multi-engine reputation"
+              source={sourceStatus.virustotal}
+            />
+          </div>
+
+          <div className="posture-strip">
+            <div>
+              <span>Database</span>
+              <strong>{databaseStatus.backend} · {databaseStatus.counts?.alerts || 0} alerts</strong>
+            </div>
+            <div>
+              <span>Scan state</span>
+              <strong>{posture.state || 'pending'}</strong>
+            </div>
+            <div>
+              <span>Packages</span>
+              <strong>{posture.packages_scanned || 0}</strong>
+            </div>
+            <div>
+              <span>Findings</span>
+              <strong>{posture.vulnerability_count || 0}</strong>
+            </div>
+            <div>
+              <span>Critical</span>
+              <strong>{posture.critical_count || 0}</strong>
+            </div>
+            <div>
+              <span>Known exploited</span>
+              <strong>{posture.known_exploited_count || 0}</strong>
+            </div>
+            <div>
+              <span>Max CVSS</span>
+              <strong>{Number(posture.max_cvss || 0).toFixed(1)}</strong>
+            </div>
+          </div>
+          <div className="analyst-queue" aria-label="Persisted analyst alert queue">
+            <div className="analyst-queue-heading">
+              <div>
+                <p className="eyebrow">Audit trail</p>
+                <h3>Persisted analyst queue</h3>
+              </div>
+              <span>{analystAlerts.length} latest</span>
+            </div>
+            {analystAlerts.length ? (
+              <div className="analyst-alert-list">
+                {analystAlerts.map((alert) => (
+                  <article key={alert.id} className={`analyst-alert ${alert.severity}`}>
+                    <div>
+                      <strong>{alert.title}</strong>
+                      <p>{alert.event_id || 'Static assessment'} · {alert.classification.replace(/_/g, ' ')}</p>
+                    </div>
+                    <span>{Math.round(alert.final_score * 100)}% · {alert.status}</span>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="analyst-empty">No persisted alerts meet the review threshold yet.</p>
+            )}
+          </div>
+          {posture.message && <p className="posture-message">{posture.message}</p>}
         </section>
 
         <section className="analytics-grid" aria-label="Traffic analytics">
@@ -750,6 +1071,30 @@ function MetricCard({ icon: Icon, label, value, accent, helper }) {
   );
 }
 
+function SourceCard({ icon: Icon, label, detail, source }) {
+  const status = source?.status || 'pending';
+  const statusLabel = {
+    live: 'Live',
+    ready: 'Ready',
+    needs_key: 'API key needed',
+    error: 'Unavailable',
+    pending: 'Checking',
+  }[status] || status;
+
+  return (
+    <article className={`source-card ${status}`}>
+      <span className="source-icon">
+        <Icon size={19} />
+      </span>
+      <div>
+        <strong>{label}</strong>
+        <p>{detail}</p>
+      </div>
+      <span className="source-state">{statusLabel}</span>
+    </article>
+  );
+}
+
 function FilterSelect({ label, value, onChange, children }) {
   return (
     <label className="select-filter">
@@ -787,8 +1132,9 @@ function LogRow({ log, onPreview, onInstall }) {
         <div className="log-meta">
           <span>{log.department}</span>
           <span>{log.data_mb} KB</span>
+          <span>{Math.round(log.risk_probability * 100)}% {log.risk_level} risk</span>
           <span>{log.date} {log.timestamp}</span>
-          <span>{log.is_in_otx ? 'OTX matched' : 'OTX clean'}</span>
+          <span>Intel: {log.intel_verdict}</span>
         </div>
       </div>
       <div className="log-actions">
@@ -839,6 +1185,9 @@ function ReportDocument({ log, reportRef }) {
   const tlpMeta = TLP_META[log.tlp] || TLP_META['TLP:CLEAR'];
   const status = getLogThreatStatus(log);
   const recommendations = getReportRecommendations(log);
+  const providers = getProviderRows(log);
+  const reasons = Array.isArray(log.risk_reasons) ? log.risk_reasons : [];
+  const posture = log.vulnerability_posture || {};
 
   return (
     <article className="report-document" ref={reportRef}>
@@ -883,10 +1232,57 @@ function ReportDocument({ log, reportRef }) {
       </section>
 
       <section className="report-section">
-        <h2>Recommended Actions</h2>
-        <ul>
+        <h2>Four-Database Evidence</h2>
+        <div className="report-table-wrap">
+          <table className="report-provider-table">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>Query status</th>
+                <th>API result for this log</th>
+              </tr>
+            </thead>
+            <tbody>
+              {providers.map((provider) => (
+                <tr key={provider.provider_id}>
+                  <td><strong>{provider.provider}</strong></td>
+                  <td>{providerStatusLabel(provider)}</td>
+                  <td>{provider.result}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="report-posture-note">
+          <strong>OSV/NVD dependency posture:</strong>{' '}
+          State {posture.state || 'not recorded'}; {toFiniteNumber(posture.packages_scanned)} packages scanned;{' '}
+          {toFiniteNumber(posture.vulnerability_count)} vulnerabilities; maximum CVSS{' '}
+          {toFiniteNumber(posture.max_cvss).toFixed(1)}.
+        </p>
+      </section>
+
+      {reasons.length > 0 && (
+        <section className="report-section">
+          <h2>Decision Reasons</h2>
+          <ul>
+            {reasons.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </section>
+      )}
+
+      <section className="report-section">
+        <h2>Evidence-Linked Recommended Actions</h2>
+        <p className="report-method-note">
+          {log.recommendation_method || 'Recommendations are local policy guidance; verify before operational action.'}
+        </p>
+        <ul className="report-recommendations">
           {recommendations.map((item) => (
-            <li key={item}>{item}</li>
+            <li key={`${item.priority}-${item.action}`}>
+              <strong>[{item.priority}] {item.action}</strong>
+              <span><b>Problem addressed:</b> {item.problem}</span>
+              <span><b>Evidence:</b> {item.evidence}</span>
+              <span><b>Sources:</b> {item.evidenceSources.join(', ') || 'Local policy'}</span>
+            </li>
           ))}
         </ul>
       </section>

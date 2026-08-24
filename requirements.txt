@@ -1,8 +1,22 @@
-fastapi
-uvicorn[standard]
-pandas
-pydantic
-scikit-learn
-joblib
-websockets
-OTXv2
+fastapi==0.140.0
+uvicorn[standard]==0.51.0
+pandas==3.0.5
+openpyxl==3.1.5
+pydantic==2.13.4
+scikit-learn==1.6.1
+joblib==1.5.3
+websockets==16.1.1
+OTXv2==1.5.12
+python-dotenv==1.2.2
+# Pin security-sensitive transitive dependencies so lockfile resolution does not
+# fall back to the very old minimum versions permitted by OTXv2/uvicorn.
+h11==0.16.0
+idna==3.18
+requests==2.34.2
+SQLAlchemy>=2.0,<2.1
+alembic>=1.14,<2
+psycopg[binary]>=3.2,<4
+Flask==3.1.2
+flask-sock==0.7.0
+catboost==1.2.8
+gunicorn==23.0.0

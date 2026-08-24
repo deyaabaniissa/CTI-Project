@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Hospital, KeyRound, Loader2, LockKeyhole, Mail, RotateCcw, ShieldCheck } from 'lucide-react';
 import './login.css';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+// In development Vite proxies these requests to the local API.  An explicit
+// VITE_API_URL remains available for a separately hosted production API.
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 export default function LoginPage({ onLoginSuccess }) {
   const [step, setStep] = useState('credentials');
@@ -211,7 +213,7 @@ export default function LoginPage({ onLoginSuccess }) {
       <aside className="login-intel" aria-label="Security highlights">
         <div>
           <p className="eyebrow">Live posture</p>
-          <h2>Monitor patient, environment, and attack telemetry in one place.</h2>
+          <h2>Monitor patient access, employee activity, and system/device logs in one place.</h2>
         </div>
         <dl>
           <div>
