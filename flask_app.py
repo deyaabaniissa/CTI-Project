@@ -331,6 +331,7 @@ def recommendations(
     prediction: Mapping[str, Any],
     provider_rows: list[dict[str, Any]],
     risk_score: float,
+    risk_level: str,
 ) -> list[dict[str, Any]]:
     family = str(prediction["predicted_family"])
     actions: list[dict[str, Any]] = []
@@ -345,6 +346,15 @@ def recommendations(
                 "evidence": f"CatBoost={family}; risk={risk_score:.1f}/100.",
             })
 
+    # A single indicator hit shouldn't outrank a confidently-safe overall
+    # verdict, unless it's a known-actively-exploited vulnerability.
+    known_exploited = any(
+        (item.get("metrics") or {}).get("known_exploited")
+        for row in provider_rows
+        for item in row.get("observations", [])
+    )
+    downgrade = risk_level == "low" and not known_exploited
+
     if risk_score >= 80:
         add("Immediate", "Isolate the affected hospital endpoint or VLAN and begin incident triage.", "Critical combined risk.", ["CatBoost", "CTI fusion"])
 
@@ -354,7 +364,12 @@ def recommendations(
         and any(item.get("verdict") in {"match", "malicious", "suspicious"} for item in row.get("observations", []))
     ]
     if adverse_ioc_sources:
-        add("Immediate", "Block confirmed malicious IP, domain, URL, or hash in firewall, DNS, proxy, and EDR controls.", "External reputation evidence matched an IOC.", adverse_ioc_sources)
+        add(
+            "Review" if downgrade else "Immediate",
+            "Block confirmed malicious IP, domain, URL, or hash in firewall, DNS, proxy, and EDR controls.",
+            "External reputation evidence matched an IOC.",
+            adverse_ioc_sources,
+        )
 
     vulnerable_sources = [
         row["provider"] for row in provider_rows
@@ -362,7 +377,12 @@ def recommendations(
         and any(item.get("verdict") == "vulnerable" for item in row.get("observations", []))
     ]
     if vulnerable_sources:
-        add("High", "Patch or mitigate the affected product/package and verify the installed version after remediation.", "The supplied vulnerability reference was confirmed.", vulnerable_sources)
+        add(
+            "Review" if downgrade else "High",
+            "Patch or mitigate the affected product/package and verify the installed version after remediation.",
+            "The supplied vulnerability reference was confirmed.",
+            vulnerable_sources,
+        )
 
     family_actions = {
         "DDoS": "Enable upstream DDoS filtering, rate limiting, and temporary source blocking.",
@@ -400,7 +420,7 @@ def analyze(payload: Mapping[str, Any]) -> dict[str, Any]:
     asset_criticality = min(max(float(event.get("asset_criticality", 0.8)), 0.0), 1.0)
     risk_score = round(100 * (0.60 * model_attack_score + 0.25 * cti_score + 0.15 * asset_criticality), 2)
     risk_level = "critical" if risk_score >= 80 else "high" if risk_score >= 60 else "medium" if risk_score >= 40 else "low"
-    action_rows = recommendations(event, prediction, provider_rows, risk_score)
+    action_rows = recommendations(event, prediction, provider_rows, risk_score, risk_level)
 
     result = {
         "investigation_id": secrets.token_hex(8),
@@ -410,7 +430,7 @@ def analyze(payload: Mapping[str, Any]) -> dict[str, Any]:
         "provider_evidence": provider_rows,
         "risk_score": risk_score,
         "risk_level": risk_level,
-        "is_threat": int(prediction["predicted_family"] != "Benign" or cti_score > 0.2),
+        "is_threat": int(risk_level != "low"),
         "recommended_actions": action_rows,
         "source_coverage": {
             row["provider_id"]: {
@@ -443,7 +463,10 @@ def dashboard_log(event: Mapping[str, Any], result: Mapping[str, Any]) -> dict[s
         "data_mb": 0.0,
         "data_unit": "KB",
         "is_threat": result["is_threat"],
-        "is_in_otx": bool(result["source_coverage"].get("otx", {}).get("available")),
+        "is_in_otx": any(
+            int((item.get("sources") or {}).get("otx", {}).get("pulse_count", 0) or 0) > 0
+            for item in result["indicator_evidence"]
+        ),
         "risk_level": result["risk_level"],
         "risk_probability": result["risk_score"] / 100.0,
         "model_probability": prediction["confidence"],
