@@ -144,7 +144,9 @@ class ThreatIntelligenceService:
     def posture(self) -> dict[str, Any]:
         return self._posture
 
-    async def enrich_indicator(self, raw_indicator: str) -> dict[str, Any]:
+    async def enrich_indicator(
+        self, raw_indicator: str, *, force_refresh: bool = False
+    ) -> dict[str, Any]:
         indicator, indicator_type = classify_indicator(raw_indicator)
         if not is_public_indicator(indicator, indicator_type):
             applicable_sources = (
@@ -169,7 +171,7 @@ class ThreatIntelligenceService:
 
         cache_key = f"{indicator_type}:{indicator}"
         cached = self._cache.get(cache_key)
-        if cached and cached[0] > time.time():
+        if not force_refresh and cached and cached[0] > time.time():
             return {**cached[1], "cached": True}
 
         lock = self._indicator_locks.setdefault(cache_key, asyncio.Lock())
@@ -177,7 +179,7 @@ class ThreatIntelligenceService:
             # A simultaneous caller can have populated the cache while this
             # request waited for the per-indicator lock.
             cached = self._cache.get(cache_key)
-            if cached and cached[0] > time.time():
+            if not force_refresh and cached and cached[0] > time.time():
                 return {**cached[1], "cached": True}
             result = await self._enrich_uncached(indicator, indicator_type)
             self._cache[cache_key] = (time.time() + self.cache_ttl, result)

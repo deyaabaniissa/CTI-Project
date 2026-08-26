@@ -183,8 +183,10 @@ def evaluation_provider_evidence(row: Mapping[str, Any]) -> list[dict[str, Any]]
             "queried": bool(observations),
             "available": available,
             "status": "available" if available else "unavailable",
+            "lookup_mode": "saved_cache",
             "result": (
-                f"{len(observations)} saved lookup(s) via {', '.join(modes)}: "
+                f"Saved cache result (not a current API call): {len(observations)} lookup(s) "
+                f"via {', '.join(modes)}: "
                 + "; ".join(query_values)
                 if observations
                 else "No saved result for this provider."
@@ -192,6 +194,9 @@ def evaluation_provider_evidence(row: Mapping[str, Any]) -> list[dict[str, Any]]
             "observations": observations,
         })
     return evidence
+
+
+evaluation_live_evidence_cache: dict[str, dict[str, Any]] = {}
 
 
 def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -203,6 +208,18 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
     risk_level = str(row.get("risk_level") or "low")
     is_in_otx = any(str(item.get("source")) == "OTX" and float(item.get("score") or 0.0) > 0 for item in cti_summary)
     tlp = "TLP:RED" if risk_level in {"critical", "high"} else "TLP:AMBER" if risk_level == "medium" else "TLP:GREEN"
+    cached_live = evaluation_live_evidence_cache.get(str(row["sample_id"]))
+    provider_evidence = (
+        list(cached_live["provider_evidence"])
+        if cached_live
+        else evaluation_provider_evidence(row)
+    )
+    indicator_evidence = (
+        list(cached_live["indicator_evidence"])
+        if cached_live
+        else list(cti_summary)
+    )
+    evidence_mode = "live_api" if cached_live else "saved_cache"
     return {
         "log_id": row["sample_id"],
         "investigation_id": row["sample_id"],
@@ -227,13 +244,22 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "risk_probability": round(risk_score / 100.0, 6),
         "risk_score": round(risk_score, 2),
         "model_probability": round(confidence, 6),
-        "intel_verdict": "four-source evidence returned",
+        "intel_verdict": (
+            "live four-source API evidence returned"
+            if cached_live and cached_live.get("all_four_available")
+            else "live API check completed with partial availability"
+            if cached_live
+            else "saved four-source evidence; live refresh available"
+        ),
         "tlp": tlp,
         "evaluation_mode": True,
         "features": row["features"],
         "class_probabilities": row["probabilities"],
-        "provider_evidence": evaluation_provider_evidence(row),
-        "indicator_evidence": cti_summary,
+        "provider_evidence": provider_evidence,
+        "indicator_evidence": indicator_evidence,
+        "evidence_mode": evidence_mode,
+        "live_evidence_checked_at": cached_live.get("checked_at") if cached_live else None,
+        "live_evidence_endpoint": f"/api/evaluation-samples/{row['sample_id']}/live-evidence",
         "recommended_actions": evaluation_recommendations(row),
         "recommendation_method": "Saved recommendations from the CatBoost plus four-source integration run.",
         "risk_reasons": [
@@ -258,11 +284,18 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
 evaluation_database_sync = database.sync_evaluation_samples(load_official_test_replay())
 
 
-async def enrich_event(event: Mapping[str, Any]) -> list[dict[str, Any]]:
+async def enrich_event(
+    event: Mapping[str, Any], *, force_refresh: bool = False
+) -> list[dict[str, Any]]:
     candidates = extract_indicators(event)
     public = [candidate for candidate in candidates if candidate.is_public]
     results = await asyncio.gather(
-        *(intelligence.enrich_indicator(candidate.value) for candidate in public),
+        *(
+            intelligence.enrich_indicator(
+                candidate.value, force_refresh=force_refresh
+            )
+            for candidate in public
+        ),
         return_exceptions=True,
     )
     evidence: list[dict[str, Any]] = []
@@ -542,6 +575,49 @@ def evaluation_samples() -> Any:
             "split": "Official TEST — never used for training or balancing",
         },
     })
+
+
+@app.post("/api/evaluation-samples/<sample_id>/live-evidence")
+def evaluation_sample_live_evidence(sample_id: str) -> Any:
+    row = next(
+        (item for item in load_official_test_replay() if str(item["sample_id"]) == sample_id),
+        None,
+    )
+    if row is None:
+        return jsonify({"error": "Evaluation sample was not found."}), 404
+
+    payload = request.get_json(silent=True) or {}
+    force_refresh = bool(payload.get("force_refresh", True))
+    if not force_refresh and sample_id in evaluation_live_evidence_cache:
+        return jsonify(evaluation_live_evidence_cache[sample_id])
+
+    evidence = runner.run(
+        enrich_event(row.get("event") or {}, force_refresh=force_refresh),
+        timeout=120,
+    )
+    provider_rows = summarize_provider_evidence(
+        evidence, intelligence.status()["sources"]
+    )
+    checked_at = datetime.now(timezone.utc).isoformat()
+    for provider in provider_rows:
+        provider["lookup_mode"] = "live_api"
+        provider["live_checked_at"] = checked_at
+        if provider.get("available"):
+            provider["result"] = f"Live API response: {provider.get('result') or 'Available.'}"
+        elif provider.get("queried"):
+            provider["result"] = f"Live API request failed: {provider.get('result') or 'Unavailable.'}"
+
+    result = {
+        "sample_id": sample_id,
+        "provider_evidence": provider_rows,
+        "indicator_evidence": evidence,
+        "checked_at": checked_at,
+        "lookup_mode": "live_api",
+        "all_four_available": all(bool(item.get("available")) for item in provider_rows),
+        "source_status": intelligence.status()["sources"],
+    }
+    evaluation_live_evidence_cache[sample_id] = result
+    return jsonify(result)
 
 
 @app.get("/api/intelligence/status")

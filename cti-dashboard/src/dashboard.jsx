@@ -41,8 +41,8 @@ const WS_URL =
 const LOG_STORAGE_KEY = 'healthcare_soc_logs_v8';
 const MAX_LOGS = 400;
 const EVALUATION_PAGE_SIZE = 25;
-const REPLAY_BATCH_SIZE = 10;
-const REPLAY_INTERVAL_MS = 5000;
+const REPLAY_BATCH_SIZE = 1;
+const REPLAY_INTERVAL_MS = 2000;
 const PROVIDER_ORDER = ['otx', 'virustotal', 'osv', 'nvd'];
 const PROVIDER_NAMES = {
   otx: 'AlienVault OTX',
@@ -202,6 +202,8 @@ const getProviderRows = (log) => {
 };
 
 const providerStatusLabel = (provider) => {
+  if (provider.status === 'available' && provider.lookup_mode === 'live_api') return 'Live API — connected';
+  if (provider.status === 'available' && provider.lookup_mode === 'saved_cache') return 'Cached result — not live';
   if (provider.status === 'available') return 'Queried — available';
   if (provider.status === 'not_applicable') return 'Not applicable';
   if (provider.status === 'not_configured') return 'Applicable — not configured';
@@ -395,7 +397,7 @@ const buildReportHtml = (log) => {
       <table><tbody>${rows}</tbody></table>
       ${featureRows ? `<h2>12 Model Features</h2><table><tbody>${featureRows}</tbody></table>` : ''}
       ${probabilityRows ? `<h2>Class Probabilities</h2><table><tbody>${probabilityRows}</tbody></table>` : ''}
-      <h2>Four-Database Evidence</h2>
+      <h2>Four-Source API Evidence</h2>
       <table class="provider-table">
         <thead><tr><th>Provider</th><th>Query status</th><th>API result for this log</th></tr></thead>
         <tbody>${providerRows}</tbody>
@@ -436,6 +438,8 @@ export default function Dashboard({ onLogout }) {
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [lastSeen, setLastSeen] = useState(null);
   const [selectedReportLog, setSelectedReportLog] = useState(null);
+  const [liveEvidenceLoading, setLiveEvidenceLoading] = useState(false);
+  const [liveEvidenceMessage, setLiveEvidenceMessage] = useState('');
   const [sourceStatus, setSourceStatus] = useState({});
   const [analystAlerts, setAnalystAlerts] = useState([]);
   const [databaseStatus, setDatabaseStatus] = useState({
@@ -814,6 +818,54 @@ export default function Dashboard({ onLogout }) {
 
   const handlePreviewReport = (log) => {
     setSelectedReportLog(log);
+    setLiveEvidenceMessage(
+      log.evidence_mode === 'live_api'
+        ? `Live API evidence checked at ${log.live_evidence_checked_at || 'the latest refresh'}.`
+        : 'This report currently shows saved evidence. Use the live refresh to contact all four APIs now.',
+    );
+    if (log.evaluation_mode && log.evidence_mode !== 'live_api') {
+      void refreshLiveEvidence(log, false);
+    }
+  };
+
+  const refreshLiveEvidence = async (log, forceRefresh = true) => {
+    if (!log?.evaluation_mode) return;
+    setLiveEvidenceLoading(true);
+    setLiveEvidenceMessage('Connecting to AlienVault OTX, VirusTotal, OSV, and NIST NVD...');
+    try {
+      const endpoint = log.live_evidence_endpoint
+        || `/api/evaluation-samples/${encodeURIComponent(log.log_id)}/live-evidence`;
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force_refresh: forceRefresh }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || payload.detail || 'Live API refresh failed.');
+
+      const updated = normalizeLog({
+        ...log,
+        provider_evidence: payload.provider_evidence,
+        indicator_evidence: payload.indicator_evidence,
+        evidence_mode: 'live_api',
+        live_evidence_checked_at: payload.checked_at,
+        intel_verdict: payload.all_four_available
+          ? 'live four-source API evidence returned'
+          : 'live API check completed with partial availability',
+      });
+      setSelectedReportLog(updated);
+      setEvaluationSamples((current) => current.map((item) => (item.log_id === updated.log_id ? updated : item)));
+      setStreamedEvaluationLogs((current) => current.map((item) => (item.log_id === updated.log_id ? updated : item)));
+      setLiveEvidenceMessage(
+        payload.all_four_available
+          ? 'Live connection verified: all four APIs returned an available response.'
+          : 'Live check completed. At least one provider is unavailable; see each provider row below.',
+      );
+    } catch (error) {
+      setLiveEvidenceMessage(error.message || 'Live API refresh failed.');
+    } finally {
+      setLiveEvidenceLoading(false);
+    }
   };
 
   const handleInstallReport = async (log) => {
@@ -891,10 +943,6 @@ export default function Dashboard({ onLogout }) {
           <a href="#model-eda">
             <Cpu size={18} />
             Model & EDA
-          </a>
-          <a href="#test-replay">
-            <CheckCircle2 size={18} />
-            TEST Replay
           </a>
           <a href="#intelligence">
             <Globe2 size={18} />
@@ -991,7 +1039,7 @@ export default function Dashboard({ onLogout }) {
             </div>
             <h2>{stats.total} visible events: {stats.threats} threat predictions and {stats.safe} benign or safe predictions.</h2>
             <p>
-              The Official TEST replay adds 10 evaluated network-flow logs every 5 seconds. {replayStats.total} of {evaluationSummary.total || 300} replay samples have entered the live window; persisted investigations remain stored separately.
+              The held-out TEST stream adds one evaluated network-flow log every 2 seconds. {replayStats.total} of {evaluationSummary.total || 300} samples have entered the live window; persisted investigations remain stored separately.
             </p>
           </div>
           <div className="risk-meter" style={{ '--risk': stats.riskScore }} aria-label={`Risk score ${stats.riskScore} percent`}>
@@ -1003,7 +1051,7 @@ export default function Dashboard({ onLogout }) {
         <section className="metric-grid" aria-label="Security metrics">
           <MetricCard icon={ShieldAlert} label="Threat Predictions" value={stats.threats} accent="#e85d75" helper="Current visible event window" />
           <MetricCard icon={ShieldCheck} label="Benign / Safe" value={stats.safe} accent="#3ab795" helper="Current visible event window" />
-          <MetricCard icon={Signal} label="Replay Progress" value={`${replayStats.total}/${evaluationSummary.total || 300}`} accent="#61b4d8" helper="10 new logs every 5 seconds" />
+          <MetricCard icon={Signal} label="Stream Progress" value={`${replayStats.total}/${evaluationSummary.total || 300}`} accent="#61b4d8" helper="1 new log every 2 seconds" />
           <MetricCard icon={Database} label="Database Evaluation Rows" value={storedEvaluationCount} accent="#d7b46a" helper={`${storedInvestigationCount} persisted live investigations`} />
         </section>
 
@@ -1049,6 +1097,7 @@ export default function Dashboard({ onLogout }) {
           </div>
         </section>
 
+        {false && (
         <section className="evaluation-replay surface" id="test-replay" aria-label="CICIoMT2024 Official TEST replay">
           <div className="section-heading evaluation-heading">
             <div>
@@ -1157,6 +1206,7 @@ export default function Dashboard({ onLogout }) {
             </>
           )}
         </section>
+        )}
 
         <section className="intelligence-surface surface" id="intelligence" aria-label="Live intelligence sources">
           <div className="section-heading intelligence-heading">
@@ -1229,36 +1279,13 @@ export default function Dashboard({ onLogout }) {
               <strong>{databaseStatus.backend === 'postgresql' ? 'Supabase PostgreSQL' : databaseStatus.backend}</strong>
             </div>
           </div>
-          <div className="analyst-queue" aria-label="Persisted analyst alert queue">
-            <div className="analyst-queue-heading">
-              <div>
-                <p className="eyebrow">Audit trail</p>
-                <h3>Persisted analyst queue</h3>
-              </div>
-              <span>{analystAlerts.length} latest</span>
-            </div>
-            {analystAlerts.length ? (
-              <div className="analyst-alert-list">
-                {analystAlerts.map((alert) => (
-                  <article key={alert.id} className={`analyst-alert ${alert.severity}`}>
-                    <div>
-                      <strong>{alert.title}</strong>
-                      <p>{alert.event_id || 'Static assessment'} · {alert.classification.replace(/_/g, ' ')}</p>
-                    </div>
-                    <span>{Math.round(alert.final_score * 100)}% · {alert.status}</span>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <p className="analyst-empty">No persisted alerts meet the review threshold yet.</p>
-            )}
-          </div>
           <p className="posture-message">
             Optional dependency scan: {posture.state || 'pending'} · {posture.packages_scanned || 0} packages · {posture.vulnerability_count || 0} findings · max CVSS {Number(posture.max_cvss || 0).toFixed(1)}
           </p>
         </section>
 
-        <section className="analytics-grid" aria-label="Training and live exploratory data analysis">
+        <section className="analytics-grid single-panel" aria-label="Live exploratory data analysis">
+          {false && (
           <div className="surface dataset-eda">
             <div className="section-heading">
               <div>
@@ -1294,6 +1321,7 @@ export default function Dashboard({ onLogout }) {
             </div>
             <p className="dataset-note">Balancing applies only to the training split. The official test split remains untouched for evaluation.</p>
           </div>
+          )}
 
           <div className="surface">
             <div className="section-heading">
@@ -1333,6 +1361,7 @@ export default function Dashboard({ onLogout }) {
           </div>
         </section>
 
+        {false && (
         <section className="category-grid" aria-label="Telemetry categories">
           {categoryData.map((item) => {
             const CategoryIcon = item.icon;
@@ -1349,6 +1378,7 @@ export default function Dashboard({ onLogout }) {
             );
           })}
         </section>
+        )}
 
         <section className="surface traffic-surface" id="traffic">
           <div className="section-heading traffic-heading">
@@ -1437,6 +1467,9 @@ export default function Dashboard({ onLogout }) {
           reportRef={reportRef}
           onClose={() => setSelectedReportLog(null)}
           onInstall={() => handleInstallReport(selectedReportLog)}
+          onRefreshLive={() => refreshLiveEvidence(selectedReportLog)}
+          liveEvidenceLoading={liveEvidenceLoading}
+          liveEvidenceMessage={liveEvidenceMessage}
         />
       )}
     </div>
@@ -1552,7 +1585,15 @@ function LogRow({ log, onPreview, onInstall }) {
   );
 }
 
-function ReportModal({ log, reportRef, onClose, onInstall }) {
+function ReportModal({
+  log,
+  reportRef,
+  onClose,
+  onInstall,
+  onRefreshLive,
+  liveEvidenceLoading,
+  liveEvidenceMessage,
+}) {
   return (
     <div className="report-modal-backdrop" role="presentation">
       <section className="report-modal" role="dialog" aria-modal="true" aria-labelledby="report-title">
@@ -1562,6 +1603,12 @@ function ReportModal({ log, reportRef, onClose, onInstall }) {
             <h2 id="report-title">{log.log_id}</h2>
           </div>
           <div className="report-toolbar-actions">
+            {log.evaluation_mode && (
+              <button type="button" onClick={onRefreshLive} disabled={liveEvidenceLoading}>
+                <RefreshCw className={liveEvidenceLoading ? 'spin' : ''} size={16} />
+                {liveEvidenceLoading ? 'Connecting...' : 'Refresh 4 Live APIs'}
+              </button>
+            )}
             <button type="button" onClick={onInstall}>
               <Download size={16} />
               Install Report
@@ -1571,6 +1618,12 @@ function ReportModal({ log, reportRef, onClose, onInstall }) {
             </button>
           </div>
         </div>
+
+        {log.evaluation_mode && (
+          <p className={`report-live-status ${log.evidence_mode === 'live_api' ? 'is-live' : ''}`}>
+            {liveEvidenceMessage}
+          </p>
+        )}
 
         <ReportDocument log={log} reportRef={reportRef} />
       </section>
@@ -1660,7 +1713,7 @@ function ReportDocument({ log, reportRef }) {
       </section>
 
       <section className="report-section">
-        <h2>Four-Database Evidence</h2>
+        <h2>Four-Source API Evidence</h2>
         <div className="report-table-wrap">
           <table className="report-provider-table">
             <thead>

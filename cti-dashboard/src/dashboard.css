@@ -1543,6 +1543,27 @@
   cursor: pointer;
 }
 
+.report-toolbar-actions button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.report-live-status {
+  margin: 0;
+  padding: 10px 18px;
+  color: #ffd38a;
+  background: #192128;
+  border-bottom: 1px solid rgba(206, 218, 228, 0.14);
+}
+
+.report-live-status.is-live {
+  color: #70e0d4;
+}
+
+.analytics-grid.single-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .report-toolbar-actions .report-close-button {
   width: 38px;
   padding: 0;
