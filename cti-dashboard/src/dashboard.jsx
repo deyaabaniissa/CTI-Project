@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
-  Bell,
   Calendar,
   CheckCircle2,
   ChevronDown,
@@ -40,8 +39,10 @@ const WS_URL =
   import.meta.env.VITE_WS_URL ||
   `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/live-logs`;
 const LOG_STORAGE_KEY = 'healthcare_soc_logs_v8';
-const MAX_LOGS = 120;
+const MAX_LOGS = 400;
 const EVALUATION_PAGE_SIZE = 25;
+const REPLAY_BATCH_SIZE = 10;
+const REPLAY_INTERVAL_MS = 5000;
 const PROVIDER_ORDER = ['otx', 'virustotal', 'osv', 'nvd'];
 const PROVIDER_NAMES = {
   otx: 'AlienVault OTX',
@@ -430,7 +431,7 @@ const installReport = async (log, reportElement) => {
 };
 
 export default function Dashboard({ onLogout }) {
-  const [logs, setLogs] = useState(loadSavedLogs);
+  const [persistedLogs, setPersistedLogs] = useState(loadSavedLogs);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [lastSeen, setLastSeen] = useState(null);
@@ -462,6 +463,7 @@ export default function Dashboard({ onLogout }) {
   const [integrationLoading, setIntegrationLoading] = useState(false);
   const [integrationMessage, setIntegrationMessage] = useState('');
   const [evaluationSamples, setEvaluationSamples] = useState([]);
+  const [streamedEvaluationLogs, setStreamedEvaluationLogs] = useState([]);
   const [evaluationSummary, setEvaluationSummary] = useState({
     total: 0,
     correct: 0,
@@ -510,7 +512,7 @@ export default function Dashboard({ onLogout }) {
         }
         const incomingLog = normalizeLog(payload);
         setLastSeen(new Date());
-        setLogs((current) => {
+        setPersistedLogs((current) => {
           const updated = mergeLogWindow([incomingLog], current);
           localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(updated));
           return updated;
@@ -573,7 +575,7 @@ export default function Dashboard({ onLogout }) {
       if (investigationsResponse.ok) {
         const investigationPayload = await investigationsResponse.json();
         const persistedLogs = mergeLogWindow(investigationPayload.investigations || []);
-        setLogs(persistedLogs);
+        setPersistedLogs(persistedLogs);
         localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(persistedLogs));
       }
       if (modelResponse.ok) {
@@ -599,6 +601,47 @@ export default function Dashboard({ onLogout }) {
     const intervalId = window.setInterval(() => loadIntelligence(), 30000);
     return () => window.clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    if (!evaluationSamples.length) return undefined;
+
+    let cursor = 0;
+    setStreamedEvaluationLogs([]);
+    const replayTimer = window.setInterval(() => {
+      const now = new Date();
+      const batch = evaluationSamples.slice(cursor, cursor + REPLAY_BATCH_SIZE).map((sample, index) => ({
+        ...sample,
+        date: now.toISOString().slice(0, 10),
+        timestamp: now.toLocaleTimeString('en-GB'),
+        replay_sequence: cursor + index + 1,
+        replay_stream: true,
+      }));
+      cursor += batch.length;
+      if (batch.length) {
+        setStreamedEvaluationLogs((current) => mergeLogWindow([...batch].reverse(), current));
+        setLastSeen(now);
+      }
+      if (cursor >= evaluationSamples.length) window.clearInterval(replayTimer);
+    }, REPLAY_INTERVAL_MS);
+
+    return () => window.clearInterval(replayTimer);
+  }, [evaluationSamples]);
+
+  const logs = useMemo(
+    () => mergeLogWindow(streamedEvaluationLogs, persistedLogs),
+    [persistedLogs, streamedEvaluationLogs],
+  );
+
+  const replayStats = useMemo(() => {
+    const correct = streamedEvaluationLogs.filter((sample) => sample.prediction_correct).length;
+    const total = streamedEvaluationLogs.length;
+    return {
+      total,
+      correct,
+      incorrect: total - correct,
+      accuracy: total ? correct / total : 0,
+    };
+  }, [streamedEvaluationLogs]);
 
   useEffect(() => {
     let active = true;
@@ -630,7 +673,9 @@ export default function Dashboard({ onLogout }) {
   const stats = useMemo(() => {
     const totals = logs.reduce(
       (acc, log) => {
-        const isThreat = log.is_threat === 1 || log.tlp === 'TLP:RED' || log.is_in_otx;
+        const isThreat = log.evaluation_mode
+          ? log.traffic_class !== 'Benign'
+          : log.is_threat === 1 || log.tlp === 'TLP:RED' || log.is_in_otx;
         acc.total += 1;
         acc.threats += isThreat ? 1 : 0;
         acc.safe += isThreat ? 0 : 1;
@@ -676,6 +721,8 @@ export default function Dashboard({ onLogout }) {
   );
   const sourceTrainingRows = balanceData.reduce((total, item) => total + (Number(item.source_rows) || 0), 0);
   const balancedTrainingRows = balanceData.reduce((total, item) => total + (Number(item.balanced_rows) || 0), 0);
+  const storedInvestigationCount = Number(databaseStatus.counts?.hospital_events || 0);
+  const storedEvaluationCount = Number(databaseStatus.counts?.model_evaluation_samples || evaluationSummary.total || 0);
 
   const filteredLogs = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
@@ -757,7 +804,8 @@ export default function Dashboard({ onLogout }) {
     }
 
     localStorage.removeItem(LOG_STORAGE_KEY);
-    setLogs([]);
+    setPersistedLogs([]);
+    setStreamedEvaluationLogs([]);
   };
 
   const resetFilters = () => {
@@ -795,7 +843,7 @@ export default function Dashboard({ onLogout }) {
       }
       const incomingLog = normalizeLog(payload.dashboard_log);
       setLastSeen(new Date());
-      setLogs((current) => {
+      setPersistedLogs((current) => {
         const updated = [incomingLog, ...current].slice(0, MAX_LOGS);
         localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(updated));
         return updated;
@@ -941,10 +989,9 @@ export default function Dashboard({ onLogout }) {
               <span className="pulse-dot" aria-hidden="true" />
               <span>{lastSeen ? `Stream heartbeat ${lastSeen.toLocaleTimeString()}` : 'Waiting for event stream'}</span>
             </div>
-            <h2>{stats.threats} of {stats.total} stored investigations are currently classified as threats.</h2>
+            <h2>{stats.total} visible events: {stats.threats} threat predictions and {stats.safe} benign or safe predictions.</h2>
             <p>
-              Stage 1 uses the trained CatBoost IDS to classify network-flow behavior. Stage 2 queries OSV,
-              NVD, AlienVault OTX, and VirusTotal for independent evidence before producing risk and response actions.
+              The Official TEST replay adds 10 evaluated network-flow logs every 5 seconds. {replayStats.total} of {evaluationSummary.total || 300} replay samples have entered the live window; persisted investigations remain stored separately.
             </p>
           </div>
           <div className="risk-meter" style={{ '--risk': stats.riskScore }} aria-label={`Risk score ${stats.riskScore} percent`}>
@@ -954,10 +1001,10 @@ export default function Dashboard({ onLogout }) {
         </section>
 
         <section className="metric-grid" aria-label="Security metrics">
-          <MetricCard icon={ShieldAlert} label="Threat Predictions" value={stats.threats} accent="#e85d75" helper={`${databaseStatus.counts?.cti_lookup_results || 0} CTI evidence records`} />
-          <MetricCard icon={ShieldCheck} label="Benign / Safe" value={stats.safe} accent="#3ab795" helper="No alert in stored window" />
-          <MetricCard icon={Bell} label="Detected Families" value={Object.keys(stats.families).length} accent="#61b4d8" helper={`${modelInfo.classes?.length || 6} trained classes`} />
-          <MetricCard icon={Database} label="Stored Investigations" value={databaseStatus.counts?.hospital_events || stats.total} accent="#d7b46a" helper="Supabase PostgreSQL" />
+          <MetricCard icon={ShieldAlert} label="Threat Predictions" value={stats.threats} accent="#e85d75" helper="Current visible event window" />
+          <MetricCard icon={ShieldCheck} label="Benign / Safe" value={stats.safe} accent="#3ab795" helper="Current visible event window" />
+          <MetricCard icon={Signal} label="Replay Progress" value={`${replayStats.total}/${evaluationSummary.total || 300}`} accent="#61b4d8" helper="10 new logs every 5 seconds" />
+          <MetricCard icon={Database} label="Database Evaluation Rows" value={storedEvaluationCount} accent="#d7b46a" helper={`${storedInvestigationCount} persisted live investigations`} />
         </section>
 
         <section className="model-eda surface" id="model-eda" aria-label="Model validation and exploratory data analysis">
@@ -981,7 +1028,7 @@ export default function Dashboard({ onLogout }) {
                 <ShieldCheck size={16} />
                 <span>
                   Full scientific evaluation: <strong>{Number(modelInfo.evaluation?.official_test_rows || 47711).toLocaleString()}</strong> untouched Official TEST rows.
-                  Kaggle replay: <strong>{Number(modelInfo.evaluation?.website_replay_rows || 300)}</strong> unique rows at <strong>{(toFiniteNumber(modelInfo.evaluation?.website_replay_accuracy || (284 / 300)) * 100).toFixed(1)}%</strong> sample accuracy with saved OTX, VirusTotal, OSV, and NVD evidence.
+                  Evaluation replay: <strong>{Number(modelInfo.evaluation?.website_replay_rows || 300)}</strong> unique rows at <strong>{(toFiniteNumber(modelInfo.evaluation?.website_replay_accuracy || (284 / 300)) * 100).toFixed(1)}%</strong> accuracy with saved OTX, VirusTotal, OSV, and NVD evidence.
                 </span>
               </div>
               <div className="pipeline-explainer">
@@ -1006,17 +1053,17 @@ export default function Dashboard({ onLogout }) {
           <div className="section-heading evaluation-heading">
             <div>
               <p className="eyebrow">Held-out model evaluation</p>
-              <h2>300-sample Official TEST replay</h2>
+              <h2>300-sample Official TEST live replay</h2>
               <p className="section-description">
                 Fifty unique rows from each of the six CICIoMT2024 families, sampled without replacement.
                 These rows are used only for prediction and reporting—never for training, balancing, or tuning.
               </p>
             </div>
-            <span className="model-badge">Official TEST · 50 × 6 families</span>
+            <span className="model-badge">Live replay · 10 logs every 5 seconds</span>
           </div>
 
           <div className="evaluation-summary" aria-label="Replay summary">
-            <div><span>Samples</span><strong>{evaluationSummary.total || 300}</strong></div>
+            <div><span>Replay progress</span><strong>{replayStats.total}/{evaluationSummary.total || 300}</strong></div>
             <div><span>Correct</span><strong>{evaluationSummary.correct || 0}</strong></div>
             <div><span>Incorrect</span><strong>{evaluationSummary.incorrect || 0}</strong></div>
             <div><span>Sample accuracy</span><strong>{`${(toFiniteNumber(evaluationSummary.accuracy) * 100).toFixed(1)}%`}</strong></div>
@@ -1105,7 +1152,7 @@ export default function Dashboard({ onLogout }) {
                 </div>
               </div>
               <p className="dataset-note evaluation-note">
-                OTX, VirusTotal, OSV, and NVD are shown in every report. They are marked “Not applicable” for these rows because the official flow CSV contains numeric traffic features—not a public IoC, CVE, or package identifier.
+                Each evaluation report includes the saved CatBoost prediction, risk score, response actions, and evidence returned by OTX, VirusTotal, OSV, and NVD. The replay is a presentation stream and does not insert duplicate incident records into the database.
               </p>
             </>
           )}
@@ -1253,9 +1300,14 @@ export default function Dashboard({ onLogout }) {
               <div>
                 <p className="eyebrow">Live EDA</p>
                 <h2>Live prediction distribution</h2>
-                <p className="section-description">Attack families predicted from investigations currently stored in Supabase.</p>
+                <p className="section-description">Running distribution for the evaluation replay plus persisted investigations currently visible in the dashboard.</p>
               </div>
               <AlertTriangle size={18} />
+            </div>
+            <div className="dataset-summary live-replay-summary" aria-label="Live replay EDA summary">
+              <div><span>Streamed</span><strong>{replayStats.total}/{evaluationSummary.total || 300}</strong></div>
+              <div><span>Correct so far</span><strong>{replayStats.correct}</strong></div>
+              <div><span>Running accuracy</span><strong>{replayStats.total ? `${(replayStats.accuracy * 100).toFixed(1)}%` : 'Waiting'}</strong></div>
             </div>
             <div className="pie-layout">
               <ResponsiveContainer width="52%" height={220}>

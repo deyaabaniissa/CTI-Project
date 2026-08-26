@@ -42,7 +42,7 @@ The scientific evaluation uses all **47,711 untouched Official TEST rows**. The 
 
 ### Website evaluation replay
 
-The website uses the saved **Kaggle evaluation of 300 unique CICIoMT2024 Official TEST rows**. The unchanged artifacts are stored at `data/evaluation/official_test_50_samples_per_family_results.csv` and `data/evaluation/official_test_50_samples_per_family_full_results.json`. They contain 50 rows from each of `Benign`, `DDoS`, `DoS`, `MQTT`, `Recon`, and `Spoofing`, sampled without replacement.
+The website uses a saved **evaluation of 300 unique CICIoMT2024 Official TEST rows**. The source artifacts are stored at `data/evaluation/official_test_50_samples_per_family_results.csv` and `data/evaluation/official_test_50_samples_per_family_full_results.json`. They contain 50 rows from each of `Benign`, `DDoS`, `DoS`, `MQTT`, `Recon`, and `Spoofing`, sampled without replacement.
 
 | Metric | Score |
 | --- | ---: |
@@ -51,7 +51,7 @@ The website uses the saved **Kaggle evaluation of 300 unique CICIoMT2024 Officia
 | Incorrect predictions | 16 |
 | Replay accuracy | 94.67% |
 
-The replay powers the website's searchable TEST table and per-row PDF reports. It does not replace the full 47,711-row scientific evaluation. Each report uses the exact saved Kaggle prediction, confidence, risk score, recommendations, 12 feature values, six class probabilities, and OTX, VirusTotal, OSV, and NVD results.
+The replay powers the website's searchable TEST table and per-row PDF reports. It also enters the visible traffic log and live EDA in batches of 10 samples every 5 seconds without creating duplicate incident rows. It does not replace the full 47,711-row scientific evaluation. Each report uses the exact saved prediction, confidence, risk score, recommendations, 12 feature values, six class probabilities, and OTX, VirusTotal, OSV, and NVD results.
 
 ## Investigation workflow
 

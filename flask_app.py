@@ -91,13 +91,13 @@ def flatten_event(payload: Mapping[str, Any]) -> dict[str, Any]:
 def load_official_test_replay() -> tuple[dict[str, Any], ...]:
     if not OFFICIAL_TEST_REPLAY_PATH.is_file():
         raise FileNotFoundError(
-            "The 300-row Kaggle CICIoMT2024 Official TEST result artifact is missing."
+            "The 300-row CICIoMT2024 Official TEST result artifact is missing."
         )
 
     payload = json.loads(OFFICIAL_TEST_REPLAY_PATH.read_text(encoding="utf-8"))
     raw_results = payload.get("results") if isinstance(payload, Mapping) else None
     if not isinstance(raw_results, list) or len(raw_results) != 300:
-        raise ValueError("Expected exactly 300 Kaggle evaluation results.")
+        raise ValueError("Expected exactly 300 official evaluation results.")
 
     rows: list[dict[str, Any]] = []
     for item in raw_results:
@@ -105,7 +105,7 @@ def load_official_test_replay() -> tuple[dict[str, Any], ...]:
         result = item.get("result") if isinstance(item, Mapping) else None
         prediction = result.get("prediction") if isinstance(result, Mapping) else None
         if not isinstance(event, Mapping) or not isinstance(result, Mapping) or not isinstance(prediction, Mapping):
-            raise ValueError("A Kaggle evaluation result is missing event or prediction data.")
+            raise ValueError("An official evaluation result is missing event or prediction data.")
 
         true_family = str(event["ground_truth_family"])
         predicted_family = str(prediction["predicted_family"])
@@ -116,10 +116,10 @@ def load_official_test_replay() -> tuple[dict[str, Any], ...]:
             for family in model_service.classes
         }
         rows.append({
-            "sample_id": f"CIC24-KAGGLE-{true_family.upper()}-{sample_number:03d}",
+            "sample_id": f"CIC24-TEST-{true_family.upper()}-{sample_number:03d}",
             "source_dataset": "CICIoMT2024",
             "source_split": "Official TEST",
-            "source_file": "Kaggle Official TEST evaluation",
+            "source_file": "CICIoMT2024 Official TEST evaluation",
             "source_row_number": int(event["sample_position"]),
             "attack_subclass": true_family,
             "true_family": true_family,
@@ -134,8 +134,8 @@ def load_official_test_replay() -> tuple[dict[str, Any], ...]:
             "risk_score": float(result.get("risk_score") or 0.0),
             "risk_level": str(result.get("risk_level") or "low"),
             "recommended_action_texts": [str(value) for value in result.get("recommended_actions") or []],
-            "kaggle_investigation_id": str(result.get("investigation_id") or ""),
-            "kaggle_created_at": str(result.get("created_at") or ""),
+            "source_investigation_id": str(result.get("investigation_id") or ""),
+            "source_created_at": str(result.get("created_at") or ""),
         })
     return tuple(rows)
 
@@ -148,9 +148,9 @@ def evaluation_recommendations(row: Mapping[str, Any]) -> list[dict[str, Any]]:
         {
             "priority": priority,
             "action": action,
-            "problem": f"Kaggle integration result for a {row['predicted_family']} prediction.",
+            "problem": f"Four-source integration result for a {row['predicted_family']} prediction.",
             "evidence_sources": sources,
-            "evidence": "Recommendation returned by the saved Kaggle four-source investigation.",
+            "evidence": "Recommendation returned by the saved four-source investigation.",
         }
         for action in row.get("recommended_action_texts", [])
     ]
@@ -184,10 +184,10 @@ def evaluation_provider_evidence(row: Mapping[str, Any]) -> list[dict[str, Any]]
             "available": available,
             "status": "available" if available else "unavailable",
             "result": (
-                f"{len(observations)} Kaggle lookup(s) via {', '.join(modes)}: "
+                f"{len(observations)} saved lookup(s) via {', '.join(modes)}: "
                 + "; ".join(query_values)
                 if observations
-                else "No saved Kaggle result for this provider."
+                else "No saved result for this provider."
             ),
             "observations": observations,
         })
@@ -227,7 +227,7 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "risk_probability": round(risk_score / 100.0, 6),
         "risk_score": round(risk_score, 2),
         "model_probability": round(confidence, 6),
-        "intel_verdict": "four-source Kaggle evidence returned",
+        "intel_verdict": "four-source evidence returned",
         "tlp": tlp,
         "evaluation_mode": True,
         "features": row["features"],
@@ -235,12 +235,12 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "provider_evidence": evaluation_provider_evidence(row),
         "indicator_evidence": cti_summary,
         "recommended_actions": evaluation_recommendations(row),
-        "recommendation_method": "Saved recommendations from the Kaggle CatBoost plus four-source integration run.",
+        "recommendation_method": "Saved recommendations from the CatBoost plus four-source integration run.",
         "risk_reasons": [
             f"Ground truth: {row['true_family']}.",
             f"CatBoost prediction: {predicted_family} ({confidence:.1%}).",
             "Correct prediction." if row["correct"] else "Incorrect prediction retained for transparent evaluation.",
-            f"Kaggle four-source risk score: {risk_score:.2f}/100 ({risk_level}).",
+            f"Four-source risk score: {risk_score:.2f}/100 ({risk_level}).",
             "This unique row belongs only to the held-out CICIoMT2024 Official TEST split.",
         ],
         "model_details": {

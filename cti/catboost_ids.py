@@ -36,7 +36,7 @@ def _finite_number(value: Any) -> float:
 
 
 class CatBoostIDSService:
-    """Load the Kaggle artifact once and expose a small prediction API."""
+    """Load the trained model artifact once and expose a small prediction API."""
 
     def __init__(self, artifact_path: Path):
         self.artifact_path = artifact_path.resolve()
