@@ -42,22 +42,16 @@ The scientific evaluation uses all **47,711 untouched Official TEST rows**. The 
 
 ### Website evaluation replay
 
-A deterministic replay of **300 unique CICIoMT2024 Official TEST rows** is stored at `data/evaluation/ciciomt2024_test_300_predictions.csv`. It contains 50 rows from each of `Benign`, `DDoS`, `DoS`, `MQTT`, `Recon`, and `Spoofing`, sampled without replacement.
+The website uses the saved **Kaggle evaluation of 300 unique CICIoMT2024 Official TEST rows**. The unchanged artifacts are stored at `data/evaluation/official_test_50_samples_per_family_results.csv` and `data/evaluation/official_test_50_samples_per_family_full_results.json`. They contain 50 rows from each of `Benign`, `DDoS`, `DoS`, `MQTT`, `Recon`, and `Spoofing`, sampled without replacement.
 
 | Metric | Score |
 | --- | ---: |
 | Rows | 300 |
-| Correct predictions | 279 |
-| Incorrect predictions | 21 |
-| Replay accuracy | 93.00% |
+| Correct predictions | 284 |
+| Incorrect predictions | 16 |
+| Replay accuracy | 94.67% |
 
-The replay powers the website's searchable TEST table and per-row PDF reports. It does not replace the full 47,711-row scientific evaluation. Each report shows the 12 feature values, six class probabilities, ground truth, prediction, and response guidance. The four CTI providers are marked `Not applicable` when a flow row contains no public IoC, CVE, or package identifier.
-
-Recreate the replay artifact from the official local TEST CSV files with:
-
-```powershell
-.\.venv\Scripts\python.exe prepare_ciciomt2024_test_replay.py
-```
+The replay powers the website's searchable TEST table and per-row PDF reports. It does not replace the full 47,711-row scientific evaluation. Each report uses the exact saved Kaggle prediction, confidence, risk score, recommendations, 12 feature values, six class probabilities, and OTX, VirusTotal, OSV, and NVD results.
 
 ## Investigation workflow
 

@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
-from sqlalchemy import func, inspect, select
+from sqlalchemy import delete, func, inspect, select
 
 from cti.db.models import (
     Alert,
@@ -119,6 +119,7 @@ class SitePersistenceService:
         factory = get_session_factory()
         inserted = 0
         updated = 0
+        deleted = 0
         with factory() as session:
             model_name = str(self.model_metadata.get("model_name") or "ciciomt2024-catboost")
             model = session.scalar(select(ModelVersion).where(ModelVersion.name == model_name))
@@ -132,6 +133,12 @@ class SitePersistenceService:
                     select(ModelEvaluationSample).where(ModelEvaluationSample.sample_key.in_(sample_keys))
                 )
             }
+            stale = session.execute(
+                delete(ModelEvaluationSample)
+                .where(~ModelEvaluationSample.sample_key.in_(sample_keys))
+                .execution_options(synchronize_session=False)
+            )
+            deleted = int(stale.rowcount or 0)
             for row in rows:
                 sample_key = str(row["sample_id"])
                 sample = existing.get(sample_key)
@@ -168,7 +175,7 @@ class SitePersistenceService:
                     sample.class_probabilities = json_safe(row["probabilities"])
                     updated += 1
             session.commit()
-        return {"inserted": inserted, "updated": updated, "total": len(rows)}
+        return {"inserted": inserted, "updated": updated, "deleted": deleted, "total": len(rows)}
 
     @staticmethod
     def _get_or_create_asset(session, event: Mapping[str, Any]) -> Asset | None:

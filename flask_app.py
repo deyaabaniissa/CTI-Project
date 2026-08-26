@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import csv
 import hmac
 import json
 import os
@@ -31,7 +30,10 @@ DIST_DIR = PROJECT_ROOT / "cti-dashboard" / "dist"
 MODEL_PATH = PROJECT_ROOT / "official_ciciomt2024_catboost_12_features_6_classes.joblib"
 SAMPLE_PATH = PROJECT_ROOT / "data" / "demo" / "integration_sample.json"
 OFFICIAL_TEST_REPLAY_PATH = (
-    PROJECT_ROOT / "data" / "evaluation" / "ciciomt2024_test_300_predictions.csv"
+    PROJECT_ROOT
+    / "data"
+    / "evaluation"
+    / "official_test_50_samples_per_family_full_results.json"
 )
 RESULTS_PATH = PROJECT_ROOT / "outputs" / "flask_investigations.jsonl"
 
@@ -89,101 +91,118 @@ def flatten_event(payload: Mapping[str, Any]) -> dict[str, Any]:
 def load_official_test_replay() -> tuple[dict[str, Any], ...]:
     if not OFFICIAL_TEST_REPLAY_PATH.is_file():
         raise FileNotFoundError(
-            "The 300-row CICIoMT2024 Official TEST replay artifact is missing. "
-            "Run prepare_ciciomt2024_test_replay.py first."
+            "The 300-row Kaggle CICIoMT2024 Official TEST result artifact is missing."
         )
 
+    payload = json.loads(OFFICIAL_TEST_REPLAY_PATH.read_text(encoding="utf-8"))
+    raw_results = payload.get("results") if isinstance(payload, Mapping) else None
+    if not isinstance(raw_results, list) or len(raw_results) != 300:
+        raise ValueError("Expected exactly 300 Kaggle evaluation results.")
+
     rows: list[dict[str, Any]] = []
-    with OFFICIAL_TEST_REPLAY_PATH.open("r", encoding="utf-8-sig", newline="") as source:
-        for raw in csv.DictReader(source):
-            features = {
-                feature: float(raw[feature])
-                for feature in model_service.features
-            }
-            probabilities = {
-                family: float(raw[f"probability_{family}"])
-                for family in model_service.classes
-            }
-            rows.append({
-                "sample_id": raw["sample_id"],
-                "source_dataset": raw["source_dataset"],
-                "source_split": raw["source_split"],
-                "source_file": raw["source_file"],
-                "source_row_number": int(raw["source_row_number"]),
-                "attack_subclass": raw["attack_subclass"],
-                "true_family": raw["true_family"],
-                "predicted_family": raw["predicted_family"],
-                "confidence": float(raw["confidence"]),
-                "correct": raw["correct"].strip().lower() == "true",
-                "probabilities": probabilities,
-                "features": features,
-            })
+    for item in raw_results:
+        event = item.get("event") if isinstance(item, Mapping) else None
+        result = item.get("result") if isinstance(item, Mapping) else None
+        prediction = result.get("prediction") if isinstance(result, Mapping) else None
+        if not isinstance(event, Mapping) or not isinstance(result, Mapping) or not isinstance(prediction, Mapping):
+            raise ValueError("A Kaggle evaluation result is missing event or prediction data.")
+
+        true_family = str(event["ground_truth_family"])
+        predicted_family = str(prediction["predicted_family"])
+        sample_number = int(event["sample_number_in_family"])
+        features = {feature: float(event[feature]) for feature in model_service.features}
+        probabilities = {
+            family: float((prediction.get("probabilities") or {}).get(family, 0.0))
+            for family in model_service.classes
+        }
+        rows.append({
+            "sample_id": f"CIC24-KAGGLE-{true_family.upper()}-{sample_number:03d}",
+            "source_dataset": "CICIoMT2024",
+            "source_split": "Official TEST",
+            "source_file": "Kaggle Official TEST evaluation",
+            "source_row_number": int(event["sample_position"]),
+            "attack_subclass": true_family,
+            "true_family": true_family,
+            "predicted_family": predicted_family,
+            "confidence": float(prediction["confidence"]),
+            "correct": predicted_family == true_family,
+            "probabilities": probabilities,
+            "features": features,
+            "event": dict(event),
+            "cti_summary": list(result.get("cti_summary") or []),
+            "observables": dict(result.get("observables") or {}),
+            "risk_score": float(result.get("risk_score") or 0.0),
+            "risk_level": str(result.get("risk_level") or "low"),
+            "recommended_action_texts": [str(value) for value in result.get("recommended_actions") or []],
+            "kaggle_investigation_id": str(result.get("investigation_id") or ""),
+            "kaggle_created_at": str(result.get("created_at") or ""),
+        })
     return tuple(rows)
 
 
 def evaluation_recommendations(row: Mapping[str, Any]) -> list[dict[str, Any]]:
-    family = str(row["predicted_family"])
-    confidence = float(row["confidence"])
-    actions: list[dict[str, Any]] = []
+    risk_level = str(row.get("risk_level") or "low")
+    priority = "Critical" if risk_level == "critical" else "High" if risk_level == "high" else "Review"
+    sources = sorted({str(item.get("source")) for item in row.get("cti_summary", []) if item.get("source")})
+    return [
+        {
+            "priority": priority,
+            "action": action,
+            "problem": f"Kaggle integration result for a {row['predicted_family']} prediction.",
+            "evidence_sources": sources,
+            "evidence": "Recommendation returned by the saved Kaggle four-source investigation.",
+        }
+        for action in row.get("recommended_action_texts", [])
+    ]
 
-    if not bool(row["correct"]):
-        actions.append({
-            "priority": "Evaluation",
-            "action": "Review this misclassified TEST flow and compare its feature pattern with both families.",
-            "problem": f"Ground truth is {row['true_family']}, while CatBoost predicted {family}.",
-            "evidence_sources": ["CICIoMT2024 Official TEST", "CatBoost prediction"],
-            "evidence": f"Prediction confidence={confidence:.1%}; this row was never used for training.",
-        })
 
-    family_actions = {
-        "DDoS": "Apply upstream DDoS filtering, rate limiting, and temporary source blocking after analyst confirmation.",
-        "DoS": "Rate-limit the suspected source and verify the availability of the affected IoMT service.",
-        "MQTT": "Restrict MQTT broker access, rotate credentials, and verify TLS and topic ACLs.",
-        "Recon": "Inspect adjacent firewall records for scanning behavior and block a confirmed scanning source.",
-        "Spoofing": "Inspect ARP tables and switch telemetry, then enable Dynamic ARP Inspection where supported.",
-        "Benign": "Retain the flow as baseline evidence and monitor only if similar activity becomes persistent.",
+def evaluation_provider_evidence(row: Mapping[str, Any]) -> list[dict[str, Any]]:
+    provider_metadata = {
+        "OTX": ("otx", "AlienVault OTX"),
+        "VirusTotal": ("virustotal", "VirusTotal"),
+        "OSV": ("osv", "OSV"),
+        "NVD": ("nvd", "NIST NVD"),
     }
-    actions.append({
-        "priority": "High" if family != "Benign" else "Monitor",
-        "action": family_actions[family],
-        "problem": f"CatBoost classified this held-out flow as {family}.",
-        "evidence_sources": ["CICIoMT2024 CatBoost", "Official TEST replay"],
-        "evidence": f"Model confidence={confidence:.1%}; no external indicator was present in this flow row.",
-    })
-    actions.append({
-        "priority": "Review",
-        "action": "Validate the model result against surrounding packet, firewall, and endpoint telemetry before operational action.",
-        "problem": "A tabular flow record alone does not establish the full incident context.",
-        "evidence_sources": ["Local SOC policy"],
-        "evidence": "OTX, VirusTotal, OSV, and NVD require an applicable public indicator, CVE, or package identifier.",
-    })
-    return actions
+    grouped: dict[str, list[dict[str, Any]]] = {name: [] for name in provider_metadata}
+    for raw in row.get("cti_summary", []):
+        source = str(raw.get("source") or "")
+        if source in grouped:
+            grouped[source].append(dict(raw))
+
+    evidence: list[dict[str, Any]] = []
+    for source, (provider_id, provider_name) in provider_metadata.items():
+        observations = grouped[source]
+        available = bool(observations) and all(bool(item.get("ok")) for item in observations)
+        modes = sorted({str(item.get("lookup_mode") or "unknown") for item in observations})
+        query_values = [str(item.get("query_value") or "") for item in observations]
+        evidence.append({
+            "provider_id": provider_id,
+            "provider": provider_name,
+            "configured": True,
+            "applicable": True,
+            "queried": bool(observations),
+            "available": available,
+            "status": "available" if available else "unavailable",
+            "result": (
+                f"{len(observations)} Kaggle lookup(s) via {', '.join(modes)}: "
+                + "; ".join(query_values)
+                if observations
+                else "No saved Kaggle result for this provider."
+            ),
+            "observations": observations,
+        })
+    return evidence
 
 
 def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
     predicted_family = str(row["predicted_family"])
     confidence = float(row["confidence"])
-    attack_probability = confidence if predicted_family != "Benign" else 1.0 - confidence
-    risk_level = "high" if attack_probability >= 0.8 else "medium" if attack_probability >= 0.5 else "low"
-    provider_evidence = [
-        {
-            "provider_id": provider_id,
-            "provider": provider,
-            "configured": True,
-            "applicable": False,
-            "queried": False,
-            "available": False,
-            "status": "not_applicable",
-            "result": reason,
-            "observations": [],
-        }
-        for provider_id, provider, reason in (
-            ("otx", "AlienVault OTX", "Not queried: the official flow row contains no public IP, domain, URL, or hash."),
-            ("virustotal", "VirusTotal", "Not queried: the official flow row contains no public IP, domain, URL, or hash."),
-            ("osv", "OSV", "Not queried: the official flow row contains no package name and version."),
-            ("nvd", "NIST NVD", "Not queried: the official flow row contains no CVE or product identifier."),
-        )
-    ]
+    event = row.get("event") or {}
+    cti_summary = row.get("cti_summary") or []
+    risk_score = float(row.get("risk_score") or 0.0)
+    risk_level = str(row.get("risk_level") or "low")
+    is_in_otx = any(str(item.get("source")) == "OTX" and float(item.get("score") or 0.0) > 0 for item in cti_summary)
+    tlp = "TLP:RED" if risk_level in {"critical", "high"} else "TLP:AMBER" if risk_level == "medium" else "TLP:GREEN"
     return {
         "log_id": row["sample_id"],
         "investigation_id": row["sample_id"],
@@ -195,34 +214,33 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "prediction_correct": bool(row["correct"]),
         "attack_subclass": row["attack_subclass"],
         "department": "CICIoMT2024 model evaluation",
-        "source_ip": "Not supplied by flow dataset",
-        "destination_target": row["source_file"],
+        "source_ip": str(event.get("src_ip") or "Not supplied"),
+        "destination_target": str(event.get("asset_id") or event.get("product") or row["source_file"]),
         "source_dataset": row["source_dataset"],
         "source_split": row["source_split"],
         "source_row_number": row["source_row_number"],
         "data_mb": 0.0,
         "data_unit": "KB",
         "is_threat": int(predicted_family != "Benign"),
-        "is_in_otx": False,
+        "is_in_otx": is_in_otx,
         "risk_level": risk_level,
-        "risk_probability": round(attack_probability, 6),
+        "risk_probability": round(risk_score / 100.0, 6),
+        "risk_score": round(risk_score, 2),
         "model_probability": round(confidence, 6),
-        "intel_verdict": "not applicable — no indicator in flow row",
-        "tlp": "TLP:AMBER" if predicted_family != "Benign" else "TLP:GREEN",
+        "intel_verdict": "four-source Kaggle evidence returned",
+        "tlp": tlp,
         "evaluation_mode": True,
         "features": row["features"],
         "class_probabilities": row["probabilities"],
-        "provider_evidence": provider_evidence,
-        "indicator_evidence": [],
+        "provider_evidence": evaluation_provider_evidence(row),
+        "indicator_evidence": cti_summary,
         "recommended_actions": evaluation_recommendations(row),
-        "recommendation_method": (
-            "Evaluation guidance generated from the CatBoost family prediction. "
-            "The four CTI sources were not queried because the official flow row has no applicable indicator."
-        ),
+        "recommendation_method": "Saved recommendations from the Kaggle CatBoost plus four-source integration run.",
         "risk_reasons": [
             f"Ground truth: {row['true_family']}.",
             f"CatBoost prediction: {predicted_family} ({confidence:.1%}).",
             "Correct prediction." if row["correct"] else "Incorrect prediction retained for transparent evaluation.",
+            f"Kaggle four-source risk score: {risk_score:.2f}/100 ({risk_level}).",
             "This unique row belongs only to the held-out CICIoMT2024 Official TEST split.",
         ],
         "model_details": {
