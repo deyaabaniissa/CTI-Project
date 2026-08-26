@@ -6,12 +6,12 @@ This repository contains a secured IoMT network-intrusion investigation platform
 
 The deployed detector is **machine learning, not deep learning**.
 
-- Algorithm: CatBoost gradient boosting for tabular data.
-- Training dataset: official CICIoMT2024 attack traffic plus Wi-Fi profiling traffic used for the Benign class.
+- Algorithm: two CatBoost gradient-boosting models in sequence — a Benign-vs-Attack gate, then an attack-family classifier run only when stage 1 says "Attack". A flat 6-way classifier has to draw the rare-family boundary against the full mass of Benign traffic, which starves precision on the rarest family; splitting the decision removes Benign from competing for that boundary entirely.
+- Training dataset: the public Kaggle mirror of the official CICIoMT2024 WiFI_and_MQTT split (`limamateus/cic-iomt-2024-wifi-mqtt`), downloaded automatically by `training/train_catboost_model.py`.
 - Input: 12 numeric network-flow features.
 - Output classes: `Benign`, `DDoS`, `DoS`, `MQTT`, `Recon`, and `Spoofing`.
 - Zero-row cleaning: a row is removed only when all 12 selected features are zero or missing.
-- Balancing: a maximum of 30,000 training rows per family, with minority-family oversampling recorded in the model artifact.
+- Balancing: stage 1 matches all Benign rows against an equal-sized, evenly-split attack sample. Stage 2 gives DDoS/DoS 300,000 real rows each (they have millions available) and caps the other three families at 30,000, oversampling Spoofing (only ~16K rows exist) up to that mark.
 
 The 12 required features are:
 
@@ -23,35 +23,62 @@ Rate, Header_Length, ack_count, Protocol Type, Tot sum, Max
 The deployed artifact is:
 
 ```text
-official_ciciomt2024_catboost_12_features_6_classes.joblib
+model/ciciomt2024_catboost_12_features_6_classes.joblib
 ```
+
+To retrain from scratch:
+
+```text
+python training/train_catboost_model.py
+```
+
+This downloads the dataset into `data/raw/ciciomt2024/` (gitignored, ~2GB) on first run, trains, evaluates against the full untouched official TEST split, and writes the artifact to `model/`.
 
 ## Evaluation
 
 ### In-domain official CICIoMT2024 test
 
-The scientific evaluation uses all **47,711 untouched Official TEST rows**. The TEST split is never used for training, class balancing, feature selection, or tuning.
+The scientific evaluation uses all **1,614,182 untouched Official TEST rows** (the entire official TEST split, not a reduced sample). The TEST split is never used for training, class balancing, feature selection, or tuning.
 
 | Metric | Score |
 | --- | ---: |
-| Accuracy | 95.42% |
-| Balanced accuracy | 93.88% |
-| Macro F1 | 91.28% |
-| Weighted F1 | 95.79% |
-| Held-out profiling Benign recall | 99.98% |
+| Accuracy | 95.03% |
+| Balanced accuracy | 93.57% |
+| Macro F1 | 90.39% |
+| Weighted F1 | 94.88% |
+
+Per-family precision/recall on the full TEST split:
+
+| Family | Precision | Recall | F1 | Support |
+| --- | ---: | ---: | ---: | ---: |
+| Benign | 96.09% | 97.30% | 96.69% | 37,607 |
+| DDoS | 93.30% | 99.95% | 96.51% | 1,066,764 |
+| DoS | 99.90% | 81.59% | 89.82% | 416,676 |
+| MQTT | 99.92% | 98.65% | 99.28% | 63,715 |
+| Recon | 99.59% | 96.55% | 98.05% | 27,676 |
+| Spoofing | 48.03% | 87.39% | 61.99% | 1,744 |
+
+**Known ceiling — DoS/DDoS confusion.** 18% of DoS traffic gets labeled DDoS. Confirmed via Cohen's d across all 46 raw dataset columns that no available feature meaningfully separates the two (best is `Variance` at d=0.32 — a small effect): these are per-flow aggregates and don't encode source-IP cardinality, the actual distinguishing property of a *distributed* attack. Also confirmed it isn't a sampling artifact — giving both classes 10x more real training rows left the misclassification count essentially unchanged while it measurably improved every other family. Operationally lower-severity than it looks: both remain correctly flagged as attack traffic, so it's a within-attack label swap, not a missed detection.
+
+**Prior single-stage model, for comparison** (flat 6-way classifier, same features/data): accuracy 99.64%, balanced accuracy 95.64%, macro F1 89.08%, DoS F1 99.89%, but Spoofing F1 only 42.78% (28% precision — roughly 3,000 Benign/MQTT/Recon rows misclassified as Spoofing per 1.6M-row window, since a flat classifier has to draw Spoofing's boundary against the full mass of Benign traffic). The two-stage architecture trades some DoS/DDoS purity for materially better rare-attack detection, which matters more for a SOC tool: Spoofing is a stealthy on-path attack worth catching reliably, whereas DoS/DDoS are loud floods that get the same "attack, high risk" response either way.
+
+Retraining is fully reproducible: `python training/train_catboost_model.py`.
 
 ### Website evaluation replay
 
-The website uses a saved **evaluation of 300 unique CICIoMT2024 Official TEST rows**. The source artifacts are stored at `data/evaluation/official_test_50_samples_per_family_results.csv` and `data/evaluation/official_test_50_samples_per_family_full_results.json`. They contain 50 rows from each of `Benign`, `DDoS`, `DoS`, `MQTT`, `Recon`, and `Spoofing`, sampled without replacement.
+`data/evaluation/official_test_50_samples_per_family_results.csv` / `_full_results.json` hold a saved 300-row replay (50 per family). Predictions, risk scores, and recommendations are regenerated against the current model whenever it's retrained, using the same risk formula as `flask_app.py`'s `analyze()`: `100 * (0.60*model_attack_score + 0.25*cti_score + 0.15*asset_criticality)`. The saved four-source CTI evidence (OTX/VirusTotal/OSV/NVD) is reused as-is since it doesn't depend on which model classified the traffic — an analyst can still force a live re-query per row from the dashboard.
+
+**Risk-weight note.** Originally 0.45/0.40/0.15. Lowered CTI's weight to 0.25 (model raised to 0.60) after finding that a single public indicator attached to an event — unrelated to whether that specific traffic is malicious — could push a maximally-confident, correctly-classified Benign prediction to a "medium" risk score purely from the CTI term. Confirmed on this replay: a 100%-confidence Benign row dropped from risk 54 ("medium") to 39 ("low") after the change. Model output now dominates the score, with CTI acting as a tie-breaker rather than a co-equal factor.
 
 | Metric | Score |
 | --- | ---: |
 | Rows | 300 |
-| Correct predictions | 284 |
-| Incorrect predictions | 16 |
-| Replay accuracy | 94.67% |
+| Correct predictions | 277 |
+| Replay accuracy | 92.33% |
 
-The replay powers the website's searchable TEST table and per-row PDF reports. It also enters the visible traffic log and live EDA in batches of 10 samples every 5 seconds without creating duplicate incident rows. It does not replace the full 47,711-row scientific evaluation. Each report uses the exact saved prediction, confidence, risk score, recommendations, 12 feature values, six class probabilities, and OTX, VirusTotal, OSV, and NVD results.
+Per-family (50 samples each): Benign 50/50, DDoS 50/50, MQTT 45/50, Recon 46/50, Spoofing 48/50, **DoS 38/50** — the balanced-sample view makes the DoS/DDoS confusion documented above look sharper than its true population-level rate (81.6% recall on the full 416K-row DoS test set) since variance is higher at n=50.
+
+The replay powers the website's searchable TEST table and per-row PDF reports. It also enters the visible traffic log and live EDA in batches of 10 samples every 5 seconds without creating duplicate incident rows. It does not replace the full-scale scientific evaluation above. Each report uses the exact saved prediction, confidence, risk score, recommendations, 12 feature values, six class probabilities, and OTX, VirusTotal, OSV, and NVD results.
 
 ## Investigation workflow
 

@@ -1,2 +1,0 @@
-model,n_features,accuracy,macro_f1,weighted_f1,balanced_accuracy,profile_benign_recall,training_minutes
-CatBoost,12,0.9542453522248538,0.9128432041263732,0.9579430095102097,0.9388129841910068,0.9998079877112135,3.4694532553354898

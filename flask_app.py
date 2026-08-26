@@ -27,7 +27,7 @@ from cti.reporting import summarize_provider_evidence
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DIST_DIR = PROJECT_ROOT / "cti-dashboard" / "dist"
-MODEL_PATH = PROJECT_ROOT / "official_ciciomt2024_catboost_12_features_6_classes.joblib"
+MODEL_PATH = PROJECT_ROOT / "model" / "ciciomt2024_catboost_12_features_6_classes.joblib"
 SAMPLE_PATH = PROJECT_ROOT / "data" / "demo" / "integration_sample.json"
 OFFICIAL_TEST_REPLAY_PATH = (
     PROJECT_ROOT
@@ -398,7 +398,7 @@ def analyze(payload: Mapping[str, Any]) -> dict[str, Any]:
         default=0.0,
     )
     asset_criticality = min(max(float(event.get("asset_criticality", 0.8)), 0.0), 1.0)
-    risk_score = round(100 * (0.45 * model_attack_score + 0.40 * cti_score + 0.15 * asset_criticality), 2)
+    risk_score = round(100 * (0.60 * model_attack_score + 0.25 * cti_score + 0.15 * asset_criticality), 2)
     risk_level = "critical" if risk_score >= 80 else "high" if risk_score >= 60 else "medium" if risk_score >= 40 else "low"
     action_rows = recommendations(event, prediction, provider_rows, risk_score)
 
