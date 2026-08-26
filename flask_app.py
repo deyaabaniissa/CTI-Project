@@ -27,7 +27,7 @@ from cti.reporting import summarize_provider_evidence
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DIST_DIR = PROJECT_ROOT / "cti-dashboard" / "dist"
-MODEL_PATH = PROJECT_ROOT / "official_ciciomt2024_catboost_12_features_6_classes.joblib"
+MODEL_PATH = PROJECT_ROOT / "model" / "ciciomt2024_catboost_12_features_6_classes.joblib"
 SAMPLE_PATH = PROJECT_ROOT / "data" / "demo" / "integration_sample.json"
 OFFICIAL_TEST_REPLAY_PATH = (
     PROJECT_ROOT

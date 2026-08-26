@@ -15,6 +15,7 @@ data/*.db-wal
 video_frames/
 data/archive/
 data/raw/
+catboost_info/
 CIC dataset/
 test_23.csv
 wustl-ehms-2020_with_attacks_categories*.csv

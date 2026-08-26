@@ -1,0 +1,156 @@
+{
+  "metrics": {
+    "accuracy": 0.9502652117295324,
+    "macro_f1": 0.9038942150763974,
+    "weighted_f1": 0.9488466420331563,
+    "balanced_accuracy": 0.9357205998550796,
+    "stage1_training_minutes": 0.35162471135457357,
+    "stage2_training_minutes": 2.7008772055308023
+  },
+  "stage2_balance_audit": [
+    {
+      "family": "DDoS",
+      "source_rows": 4779859,
+      "balanced_rows": 300000,
+      "oversampled": false
+    },
+    {
+      "family": "DoS",
+      "source_rows": 1805529,
+      "balanced_rows": 300000,
+      "oversampled": false
+    },
+    {
+      "family": "MQTT",
+      "source_rows": 262938,
+      "balanced_rows": 30000,
+      "oversampled": false
+    },
+    {
+      "family": "Recon",
+      "source_rows": 103726,
+      "balanced_rows": 30000,
+      "oversampled": false
+    },
+    {
+      "family": "Spoofing",
+      "source_rows": 16047,
+      "balanced_rows": 30000,
+      "oversampled": true
+    }
+  ],
+  "stage1_balance": {
+    "benign_rows": 192732,
+    "attack_rows_matched": 192730
+  },
+  "classification_report": "              precision    recall  f1-score   support\n\n      Benign     0.9609    0.9730    0.9669     37607\n        DDoS     0.9330    0.9995    0.9651   1066764\n         DoS     0.9990    0.8159    0.8982    416676\n        MQTT     0.9992    0.9865    0.9928     63715\n       Recon     0.9959    0.9655    0.9805     27676\n    Spoofing     0.4803    0.8739    0.6199      1744\n\n    accuracy                         0.9503   1614182\n   macro avg     0.8947    0.9357    0.9039   1614182\nweighted avg     0.9538    0.9503    0.9488   1614182\n",
+  "confusion_matrix": [
+    [
+      36591,
+      0,
+      0,
+      0,
+      50,
+      966
+    ],
+    [
+      22,
+      1066241,
+      346,
+      34,
+      13,
+      108
+    ],
+    [
+      9,
+      76626,
+      339965,
+      17,
+      31,
+      28
+    ],
+    [
+      500,
+      1,
+      7,
+      62858,
+      5,
+      344
+    ],
+    [
+      750,
+      0,
+      1,
+      0,
+      26722,
+      203
+    ],
+    [
+      208,
+      0,
+      0,
+      0,
+      12,
+      1524
+    ]
+  ],
+  "classes": [
+    "Benign",
+    "DDoS",
+    "DoS",
+    "MQTT",
+    "Recon",
+    "Spoofing"
+  ],
+  "feature_importance": [
+    {
+      "feature": "IAT",
+      "importance": 43.33572653455933
+    },
+    {
+      "feature": "Rate",
+      "importance": 9.813985849228594
+    },
+    {
+      "feature": "rst_count",
+      "importance": 8.876771553826362
+    },
+    {
+      "feature": "Header_Length",
+      "importance": 7.262998805912867
+    },
+    {
+      "feature": "Number",
+      "importance": 6.804711193159848
+    },
+    {
+      "feature": "Tot sum",
+      "importance": 5.127890613950852
+    },
+    {
+      "feature": "Tot size",
+      "importance": 3.7106649174111324
+    },
+    {
+      "feature": "Min",
+      "importance": 3.6245162687982373
+    },
+    {
+      "feature": "Max",
+      "importance": 3.567508552455693
+    },
+    {
+      "feature": "Protocol Type",
+      "importance": 3.168683689697097
+    },
+    {
+      "feature": "psh_flag_number",
+      "importance": 3.0286176403913805
+    },
+    {
+      "feature": "ack_count",
+      "importance": 1.6779243806086028
+    }
+  ],
+  "official_test_rows": 1614182
+}

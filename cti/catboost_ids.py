@@ -35,6 +35,34 @@ def _finite_number(value: Any) -> float:
     return number
 
 
+class TwoStageCatBoost:
+    """Benign-vs-Attack gate feeding an attack-family classifier; drop-in replacement for a plain CatBoost model. `family_order` = Benign first, then stage2's label order."""
+
+    def __init__(self, stage1: Any, stage2: Any, family_order: list[str]) -> None:
+        self.stage1 = stage1
+        self.stage2 = stage2
+        self.family_order = list(family_order)
+        self.classes_ = np.arange(len(self.family_order))
+
+    def predict_proba(self, frame: pd.DataFrame) -> np.ndarray:
+        p_benign_attack = np.asarray(self.stage1.predict_proba(frame))
+        p_attack = p_benign_attack[:, 1]
+        p_family_given_attack = np.asarray(self.stage2.predict_proba(frame))
+
+        combined = np.zeros((len(frame), len(self.family_order)), dtype="float64")
+        combined[:, 0] = p_benign_attack[:, 0]
+        combined[:, 1:] = p_attack[:, None] * p_family_given_attack
+        return combined
+
+    def predict(self, frame: pd.DataFrame) -> np.ndarray:
+        return np.argmax(self.predict_proba(frame), axis=1)
+
+    def get_feature_importance(self) -> np.ndarray:
+        importance_1 = np.asarray(self.stage1.get_feature_importance())
+        importance_2 = np.asarray(self.stage2.get_feature_importance())
+        return (importance_1 + importance_2) / 2.0
+
+
 class CatBoostIDSService:
     """Load the trained model artifact once and expose a small prediction API."""
 
@@ -52,10 +80,23 @@ class CatBoostIDSService:
             raise FileNotFoundError(f"CatBoost artifact not found: {self.artifact_path}")
 
         artifact = joblib.load(self.artifact_path)
-        if not isinstance(artifact, dict) or "model" not in artifact:
-            raise ValueError("The CatBoost artifact must be a dictionary containing 'model'.")
+        is_two_stage = isinstance(artifact, dict) and "stage1_model" in artifact and "stage2_model" in artifact
+        if not isinstance(artifact, dict) or not (is_two_stage or "model" in artifact):
+            raise ValueError(
+                "The CatBoost artifact must be a dictionary containing 'model', "
+                "or both 'stage1_model' and 'stage2_model'."
+            )
 
-        self.model = artifact["model"]
+        if is_two_stage:
+            self.model = TwoStageCatBoost(
+                stage1=artifact["stage1_model"],
+                stage2=artifact["stage2_model"],
+                family_order=artifact.get("family_order") or [
+                    "Benign", "DDoS", "DoS", "MQTT", "Recon", "Spoofing",
+                ],
+            )
+        else:
+            self.model = artifact["model"]
         self.features = list(
             artifact.get("selected_features")
             or artifact.get("feature_columns")
