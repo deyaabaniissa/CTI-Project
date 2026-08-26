@@ -645,8 +645,8 @@ def investigate_event_live(event, force_refresh=False):
     risk_score = round(
         100
         * (
-            0.45 * model_attack_score
-            + 0.40 * cti_score
+            0.60 * model_attack_score
+            + 0.25 * cti_score
             + 0.15 * asset_criticality
         ),
         2,

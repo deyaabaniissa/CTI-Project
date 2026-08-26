@@ -17,7 +17,7 @@
       "correct_predictions": 50,
       "mini_check_accuracy": 100.0,
       "mean_confidence": 0.9914,
-      "mean_risk_score": 54.64,
+      "mean_risk_score": 39.77,
       "all_samples_have_4_sources": true
     },
     {
@@ -26,7 +26,7 @@
       "correct_predictions": 50,
       "mini_check_accuracy": 100.0,
       "mean_confidence": 0.9733,
-      "mean_risk_score": 98.05,
+      "mean_risk_score": 97.65,
       "all_samples_have_4_sources": true
     },
     {
@@ -35,7 +35,7 @@
       "correct_predictions": 38,
       "mini_check_accuracy": 76.0,
       "mean_confidence": 0.9695,
-      "mean_risk_score": 97.88,
+      "mean_risk_score": 97.42,
       "all_samples_have_4_sources": true
     },
     {
@@ -44,7 +44,7 @@
       "correct_predictions": 45,
       "mini_check_accuracy": 90.0,
       "mean_confidence": 0.9632,
-      "mean_risk_score": 96.55,
+      "mean_risk_score": 95.65,
       "all_samples_have_4_sources": true
     },
     {
@@ -53,7 +53,7 @@
       "correct_predictions": 46,
       "mini_check_accuracy": 92.0,
       "mean_confidence": 0.9576,
-      "mean_risk_score": 97.15,
+      "mean_risk_score": 96.45,
       "all_samples_have_4_sources": true
     },
     {
@@ -62,7 +62,7 @@
       "correct_predictions": 48,
       "mini_check_accuracy": 96.0,
       "mean_confidence": 0.9526,
-      "mean_risk_score": 96.67,
+      "mean_risk_score": 95.82,
       "all_samples_have_4_sources": true
     }
   ],
@@ -245,8 +245,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -432,8 +432,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -619,7 +619,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 56.82,
+        "risk_score": 42.68,
         "risk_level": "medium",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
@@ -806,7 +806,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 55.39,
+        "risk_score": 40.76,
         "risk_level": "medium",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
@@ -993,8 +993,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -1180,8 +1180,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -1367,7 +1367,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.83,
+        "risk_score": 40.03,
         "risk_level": "medium",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
@@ -1554,7 +1554,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 57.82,
+        "risk_score": 44.01,
         "risk_level": "medium",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
@@ -1741,8 +1741,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -1928,8 +1928,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -2115,8 +2115,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.28,
-        "risk_level": "medium",
+        "risk_score": 39.29,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -2302,8 +2302,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -2489,8 +2489,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.26,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -2676,8 +2676,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -2863,7 +2863,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 55.34,
+        "risk_score": 40.7,
         "risk_level": "medium",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
@@ -3050,8 +3050,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.26,
-        "risk_level": "medium",
+        "risk_score": 39.27,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -3237,8 +3237,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -3424,7 +3424,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 58.33,
+        "risk_score": 44.69,
         "risk_level": "medium",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
@@ -3611,10 +3611,9 @@
             "score": 1.0
           }
         ],
-        "risk_score": 60.02,
-        "risk_level": "high",
+        "risk_score": 46.94,
+        "risk_level": "medium",
         "recommended_actions": [
-          "Restrict the endpoint and start priority incident triage.",
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
           "Preserve the original event and enrichment JSON for analyst review."
@@ -3799,8 +3798,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.26,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -3986,8 +3985,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.35,
-        "risk_level": "medium",
+        "risk_score": 39.39,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -4173,8 +4172,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -4360,8 +4359,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -4547,8 +4546,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -4734,8 +4733,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -4921,8 +4920,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -5108,8 +5107,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -5295,8 +5294,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.27,
-        "risk_level": "medium",
+        "risk_score": 39.28,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -5482,8 +5481,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -5669,8 +5668,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.48,
-        "risk_level": "medium",
+        "risk_score": 39.56,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -5856,8 +5855,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.27,
-        "risk_level": "medium",
+        "risk_score": 39.28,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -6043,8 +6042,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -6230,8 +6229,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -6417,8 +6416,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -6604,8 +6603,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -6791,8 +6790,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -6978,8 +6977,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -7165,8 +7164,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -7352,8 +7351,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -7539,8 +7538,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -7726,8 +7725,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.26,
-        "risk_level": "medium",
+        "risk_score": 39.26,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -7913,8 +7912,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.27,
-        "risk_level": "medium",
+        "risk_score": 39.28,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -8100,8 +8099,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.26,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -8287,8 +8286,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -8474,8 +8473,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -8661,8 +8660,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -8848,8 +8847,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.28,
-        "risk_level": "medium",
+        "risk_score": 39.29,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -9035,8 +9034,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.4,
-        "risk_level": "medium",
+        "risk_score": 39.45,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -9222,8 +9221,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -9409,8 +9408,8 @@
             "score": 1.0
           }
         ],
-        "risk_score": 54.25,
-        "risk_level": "medium",
+        "risk_score": 39.25,
+        "risk_level": "low",
         "recommended_actions": [
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
@@ -9596,7 +9595,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 95.6,
+        "risk_score": 94.38,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -9785,7 +9784,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.19,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -9974,7 +9973,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.22,
+        "risk_score": 99.21,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -10352,7 +10351,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 95.59,
+        "risk_score": 94.37,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -10541,7 +10540,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.22,
+        "risk_score": 99.21,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -10730,7 +10729,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 96.07,
+        "risk_score": 95.01,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -10919,7 +10918,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.2,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -11108,7 +11107,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.2,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -11486,7 +11485,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.81,
+        "risk_score": 97.33,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -11675,7 +11674,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.22,
+        "risk_score": 99.21,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -12053,7 +12052,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.96,
+        "risk_score": 97.53,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -12242,7 +12241,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.96,
+        "risk_score": 97.53,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -12431,7 +12430,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -12620,7 +12619,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -12809,7 +12808,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.2,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -12998,7 +12997,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 94.33,
+        "risk_score": 92.68,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -13187,7 +13186,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -13565,7 +13564,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 95.09,
+        "risk_score": 93.7,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -13754,7 +13753,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -13943,7 +13942,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 94.33,
+        "risk_score": 92.68,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -14132,7 +14131,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.19,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -14321,7 +14320,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.2,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -14510,7 +14509,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -14699,7 +14698,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -14888,7 +14887,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.75,
+        "risk_score": 97.25,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -15077,7 +15076,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 95.62,
+        "risk_score": 94.4,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -15266,7 +15265,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.19,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -15455,7 +15454,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.09,
+        "risk_score": 99.04,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -15644,7 +15643,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -15833,7 +15832,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.96,
+        "risk_score": 97.53,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -16022,7 +16021,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -16211,7 +16210,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -16400,7 +16399,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -16778,7 +16777,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 95.48,
+        "risk_score": 94.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -16967,7 +16966,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.22,
+        "risk_score": 99.21,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -17156,7 +17155,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.2,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -17345,7 +17344,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.19,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -17534,7 +17533,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.13,
+        "risk_score": 99.08,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -17723,7 +17722,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -17912,7 +17911,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 96.38,
+        "risk_score": 95.42,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -18101,7 +18100,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 87.27,
+        "risk_score": 83.27,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -18290,7 +18289,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.19,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -18479,7 +18478,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 94.06,
+        "risk_score": 92.33,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -18668,7 +18667,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -18857,7 +18856,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -19235,7 +19234,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 96.46,
+        "risk_score": 95.53,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -19424,7 +19423,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.11,
+        "risk_score": 99.07,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -19802,7 +19801,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -19991,7 +19990,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -20180,7 +20179,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.19,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -20369,7 +20368,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -20558,7 +20557,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 92.95,
+        "risk_score": 90.84,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -20747,7 +20746,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -20936,7 +20935,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -21314,7 +21313,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.19,
+        "risk_score": 99.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -21692,7 +21691,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 91.86,
+        "risk_score": 89.4,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -21881,7 +21880,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 92.62,
+        "risk_score": 90.41,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -22070,7 +22069,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -22259,7 +22258,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.19,
+        "risk_score": 99.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -22448,7 +22447,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 95.68,
+        "risk_score": 94.49,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -22826,7 +22825,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -23015,7 +23014,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -23393,7 +23392,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 95.22,
+        "risk_score": 93.88,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -23582,7 +23581,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -23771,7 +23770,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 92.82,
+        "risk_score": 90.68,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -23960,7 +23959,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.16,
+        "risk_score": 99.13,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -24338,7 +24337,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -24527,7 +24526,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 91.86,
+        "risk_score": 89.4,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -24716,7 +24715,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 95.8,
+        "risk_score": 94.65,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -24905,7 +24904,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 91.59,
+        "risk_score": 89.04,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -25094,7 +25093,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -25283,7 +25282,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.19,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -25661,7 +25660,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.2,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -26039,7 +26038,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.2,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -26417,7 +26416,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.2,
+        "risk_score": 99.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -26606,7 +26605,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -26795,7 +26794,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.1,
+        "risk_score": 99.05,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -26984,7 +26983,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.2,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -27173,7 +27172,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.22,
+        "risk_score": 99.21,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -27551,7 +27550,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 95.22,
+        "risk_score": 93.88,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -27929,7 +27928,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -28307,7 +28306,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 91.77,
+        "risk_score": 89.28,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -28496,7 +28495,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -28874,7 +28873,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 85.63,
+        "risk_score": 81.1,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -29063,7 +29062,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.62,
+        "risk_score": 98.41,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -29441,7 +29440,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.24,
+        "risk_score": 99.23,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -29630,7 +29629,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -29819,7 +29818,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -30197,7 +30196,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 95.99,
+        "risk_score": 94.91,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -30386,7 +30385,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.05,
+        "risk_score": 98.99,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -31142,7 +31141,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 93.06,
+        "risk_score": 91.0,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -31331,7 +31330,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 93.03,
+        "risk_score": 90.95,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -31709,7 +31708,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.24,
+        "risk_score": 99.23,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -32087,10 +32086,9 @@
             "score": 1.0
           }
         ],
-        "risk_score": 60.22,
-        "risk_level": "high",
+        "risk_score": 47.21,
+        "risk_level": "medium",
         "recommended_actions": [
-          "Restrict the endpoint and start priority incident triage.",
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
           "Preserve the original event and enrichment JSON for analyst review."
@@ -32464,7 +32462,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.24,
+        "risk_score": 97.91,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -32842,7 +32840,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.45,
+        "risk_score": 98.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -33031,7 +33029,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.24,
+        "risk_score": 99.23,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -33220,7 +33218,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -33976,7 +33974,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.24,
+        "risk_score": 99.23,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -34732,7 +34730,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -34921,7 +34919,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.24,
+        "risk_score": 99.23,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -35299,10 +35297,9 @@
             "score": 1.0
           }
         ],
-        "risk_score": 67.22,
-        "risk_level": "high",
+        "risk_score": 56.54,
+        "risk_level": "medium",
         "recommended_actions": [
-          "Restrict the endpoint and start priority incident triage.",
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
           "Preserve the original event and enrichment JSON for analyst review."
@@ -35487,7 +35484,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 89.88,
+        "risk_score": 86.76,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -35865,7 +35862,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -36054,7 +36051,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -36243,7 +36240,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 77.67,
+        "risk_score": 70.47,
         "risk_level": "high",
         "recommended_actions": [
           "Restrict the endpoint and start priority incident triage.",
@@ -36432,7 +36429,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.53,
+        "risk_score": 98.28,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -36810,7 +36807,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -37566,7 +37563,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -37755,7 +37752,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -37944,7 +37941,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.2,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -38133,7 +38130,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -38511,7 +38508,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -38889,7 +38886,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 77.64,
+        "risk_score": 70.43,
         "risk_level": "high",
         "recommended_actions": [
           "Restrict the endpoint and start priority incident triage.",
@@ -39078,7 +39075,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 74.48,
+        "risk_score": 66.22,
         "risk_level": "high",
         "recommended_actions": [
           "Restrict the endpoint and start priority incident triage.",
@@ -39266,7 +39263,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 96.35,
+        "risk_score": 95.39,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -39644,7 +39641,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -39833,7 +39830,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -40400,7 +40397,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.17,
+        "risk_score": 99.15,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -40589,7 +40586,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.18,
+        "risk_score": 99.16,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -41156,7 +41153,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 76.58,
+        "risk_score": 69.02,
         "risk_level": "high",
         "recommended_actions": [
           "Restrict the endpoint and start priority incident triage.",
@@ -41911,7 +41908,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.11,
+        "risk_score": 99.07,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -42100,7 +42097,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.14,
+        "risk_score": 99.1,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -42289,7 +42286,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.73,
+        "risk_score": 97.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -42478,7 +42475,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -43234,7 +43231,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.19,
+        "risk_score": 99.17,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -43801,7 +43798,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -44179,7 +44176,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.23,
+        "risk_score": 96.55,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -44557,7 +44554,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.48,
+        "risk_score": 96.89,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -45124,7 +45121,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 74.42,
+        "risk_score": 66.14,
         "risk_level": "high",
         "recommended_actions": [
           "Restrict the endpoint and start priority incident triage.",
@@ -45312,7 +45309,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -45501,7 +45498,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.64,
+        "risk_score": 97.11,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -46068,7 +46065,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.04,
+        "risk_score": 98.97,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -46257,7 +46254,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.01,
+        "risk_score": 98.93,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -46446,7 +46443,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.19,
+        "risk_score": 99.17,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -46635,7 +46632,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -47013,7 +47010,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.25,
+        "risk_score": 99.24,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -47391,7 +47388,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.14,
+        "risk_score": 99.1,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -47580,7 +47577,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.65,
+        "risk_score": 97.12,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -47769,7 +47766,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -47958,10 +47955,10 @@
             "score": 1.0
           }
         ],
-        "risk_score": 83.66,
-        "risk_level": "critical",
+        "risk_score": 78.47,
+        "risk_level": "high",
         "recommended_actions": [
-          "Immediately isolate the affected hospital endpoint or VLAN.",
+          "Restrict the endpoint and start priority incident triage.",
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
           "Inspect ARP tables, enable DHCP snooping and dynamic ARP inspection.",
@@ -48147,7 +48144,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 94.5,
+        "risk_score": 92.92,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -48336,7 +48333,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.92,
+        "risk_score": 98.82,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -48525,7 +48522,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 88.65,
+        "risk_score": 85.11,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -48714,7 +48711,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.11,
+        "risk_score": 99.06,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -49092,10 +49089,9 @@
             "score": 1.0
           }
         ],
-        "risk_score": 65.82,
-        "risk_level": "high",
+        "risk_score": 54.68,
+        "risk_level": "medium",
         "recommended_actions": [
-          "Restrict the endpoint and start priority incident triage.",
           "Block confirmed malicious IP/domain/hash in firewall, DNS and EDR.",
           "Patch or mitigate the affected product/package and verify its version.",
           "Preserve the original event and enrichment JSON for analyst review."
@@ -49280,7 +49276,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.05,
+        "risk_score": 98.98,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -49469,7 +49465,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 94.53,
+        "risk_score": 92.95,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -49658,7 +49654,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.55,
+        "risk_score": 98.32,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -49847,7 +49843,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.17,
+        "risk_score": 99.14,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -50036,7 +50032,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.39,
+        "risk_score": 98.11,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -50225,7 +50221,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.12,
+        "risk_score": 99.07,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -50414,7 +50410,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.15,
+        "risk_score": 99.12,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -50603,7 +50599,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.22,
+        "risk_score": 99.21,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -50792,7 +50788,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.41,
+        "risk_score": 98.13,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -50981,7 +50977,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.22,
+        "risk_score": 96.54,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -51170,7 +51166,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.88,
+        "risk_score": 98.76,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -51359,7 +51355,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 95.45,
+        "risk_score": 94.18,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -51548,7 +51544,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 94.54,
+        "risk_score": 92.97,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -51737,7 +51733,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.22,
+        "risk_score": 99.21,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -51926,7 +51922,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.21,
+        "risk_score": 99.19,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -52115,7 +52111,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.14,
+        "risk_score": 99.1,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -52304,7 +52300,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.24,
+        "risk_score": 97.91,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -52493,7 +52489,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 93.83,
+        "risk_score": 92.02,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -52871,7 +52867,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.12,
+        "risk_score": 99.08,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -53249,7 +53245,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.83,
+        "risk_score": 98.69,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -53438,7 +53434,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.14,
+        "risk_score": 99.11,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -53627,7 +53623,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.08,
+        "risk_score": 99.03,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -53816,7 +53812,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.14,
+        "risk_score": 97.77,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -54005,7 +54001,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 90.78,
+        "risk_score": 87.96,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -54194,7 +54190,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.11,
+        "risk_score": 99.06,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -54383,7 +54379,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -54572,7 +54568,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.16,
+        "risk_score": 99.12,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -54761,7 +54757,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.11,
+        "risk_score": 99.06,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -54950,7 +54946,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.22,
+        "risk_score": 99.21,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -55139,7 +55135,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.14,
+        "risk_score": 99.11,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -55328,7 +55324,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.07,
+        "risk_score": 99.02,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -55517,7 +55513,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 97.23,
+        "risk_score": 96.55,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -55706,7 +55702,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.16,
+        "risk_score": 99.13,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -55895,7 +55891,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.23,
+        "risk_score": 99.22,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -56084,7 +56080,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.22,
+        "risk_score": 99.21,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -56273,7 +56269,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 99.22,
+        "risk_score": 99.21,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -56462,7 +56458,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 98.29,
+        "risk_score": 97.97,
         "risk_level": "critical",
         "recommended_actions": [
           "Immediately isolate the affected hospital endpoint or VLAN.",
@@ -56651,7 +56647,7 @@
             "score": 1.0
           }
         ],
-        "risk_score": 76.58,
+        "risk_score": 69.02,
         "risk_level": "high",
         "recommended_actions": [
           "Restrict the endpoint and start priority incident triage.",

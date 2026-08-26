@@ -398,7 +398,7 @@ def analyze(payload: Mapping[str, Any]) -> dict[str, Any]:
         default=0.0,
     )
     asset_criticality = min(max(float(event.get("asset_criticality", 0.8)), 0.0), 1.0)
-    risk_score = round(100 * (0.45 * model_attack_score + 0.40 * cti_score + 0.15 * asset_criticality), 2)
+    risk_score = round(100 * (0.60 * model_attack_score + 0.25 * cti_score + 0.15 * asset_criticality), 2)
     risk_level = "critical" if risk_score >= 80 else "high" if risk_score >= 60 else "medium" if risk_score >= 40 else "low"
     action_rows = recommendations(event, prediction, provider_rows, risk_score)
 

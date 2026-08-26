@@ -66,7 +66,9 @@ Retraining is fully reproducible: `python training/train_catboost_model.py`.
 
 ### Website evaluation replay
 
-`data/evaluation/official_test_50_samples_per_family_results.csv` / `_full_results.json` hold a saved 300-row replay (50 per family). Predictions, risk scores, and recommendations are regenerated against the current model whenever it's retrained (`training/train_catboost_model.py`'s risk-scoring formula matches `flask_app.py`'s `analyze()` exactly: `100 * (0.45*model_attack_score + 0.40*cti_score + 0.15*asset_criticality)`); the saved four-source CTI evidence (OTX/VirusTotal/OSV/NVD) is reused as-is since it doesn't depend on which model classified the traffic — an analyst can still force a live re-query per row from the dashboard.
+`data/evaluation/official_test_50_samples_per_family_results.csv` / `_full_results.json` hold a saved 300-row replay (50 per family). Predictions, risk scores, and recommendations are regenerated against the current model whenever it's retrained, using the same risk formula as `flask_app.py`'s `analyze()`: `100 * (0.60*model_attack_score + 0.25*cti_score + 0.15*asset_criticality)`. The saved four-source CTI evidence (OTX/VirusTotal/OSV/NVD) is reused as-is since it doesn't depend on which model classified the traffic — an analyst can still force a live re-query per row from the dashboard.
+
+**Risk-weight note.** Originally 0.45/0.40/0.15. Lowered CTI's weight to 0.25 (model raised to 0.60) after finding that a single public indicator attached to an event — unrelated to whether that specific traffic is malicious — could push a maximally-confident, correctly-classified Benign prediction to a "medium" risk score purely from the CTI term. Confirmed on this replay: a 100%-confidence Benign row dropped from risk 54 ("medium") to 39 ("low") after the change. Model output now dominates the score, with CTI acting as a tie-breaker rather than a co-equal factor.
 
 | Metric | Score |
 | --- | ---: |
