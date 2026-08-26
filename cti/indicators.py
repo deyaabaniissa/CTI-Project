@@ -13,8 +13,8 @@ HASH_PATTERNS = {
     "md5": re.compile(r"^[a-fA-F0-9]{32}$"),
 }
 CVE_PATTERN = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
-# Synthetic workbook values sometimes use a wider alphabet than production
-# GitHub advisories. OSV remains the authority on whether the ID exists.
+# Accept the complete advisory identifier alphabet; OSV remains the authority
+# on whether a submitted GHSA identifier exists.
 GHSA_PATTERN = re.compile(r"^GHSA-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$", re.IGNORECASE)
 DOMAIN_PATTERN = re.compile(
     r"^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$"

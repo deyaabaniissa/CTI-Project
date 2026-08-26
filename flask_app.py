@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import hmac
 import json
 import os
@@ -10,6 +11,7 @@ import threading
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -28,6 +30,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DIST_DIR = PROJECT_ROOT / "cti-dashboard" / "dist"
 MODEL_PATH = PROJECT_ROOT / "official_ciciomt2024_catboost_12_features_6_classes.joblib"
 SAMPLE_PATH = PROJECT_ROOT / "data" / "demo" / "integration_sample.json"
+OFFICIAL_TEST_REPLAY_PATH = (
+    PROJECT_ROOT / "data" / "evaluation" / "ciciomt2024_test_300_predictions.csv"
+)
 RESULTS_PATH = PROJECT_ROOT / "outputs" / "flask_investigations.jsonl"
 
 load_dotenv(PROJECT_ROOT / ".env")
@@ -78,6 +83,161 @@ def flatten_event(payload: Mapping[str, Any]) -> dict[str, Any]:
         if event.get(source) and not event.get(target):
             event[target] = event[source]
     return event
+
+
+@lru_cache(maxsize=1)
+def load_official_test_replay() -> tuple[dict[str, Any], ...]:
+    if not OFFICIAL_TEST_REPLAY_PATH.is_file():
+        raise FileNotFoundError(
+            "The 300-row CICIoMT2024 Official TEST replay artifact is missing. "
+            "Run prepare_ciciomt2024_test_replay.py first."
+        )
+
+    rows: list[dict[str, Any]] = []
+    with OFFICIAL_TEST_REPLAY_PATH.open("r", encoding="utf-8-sig", newline="") as source:
+        for raw in csv.DictReader(source):
+            features = {
+                feature: float(raw[feature])
+                for feature in model_service.features
+            }
+            probabilities = {
+                family: float(raw[f"probability_{family}"])
+                for family in model_service.classes
+            }
+            rows.append({
+                "sample_id": raw["sample_id"],
+                "source_dataset": raw["source_dataset"],
+                "source_split": raw["source_split"],
+                "source_file": raw["source_file"],
+                "source_row_number": int(raw["source_row_number"]),
+                "attack_subclass": raw["attack_subclass"],
+                "true_family": raw["true_family"],
+                "predicted_family": raw["predicted_family"],
+                "confidence": float(raw["confidence"]),
+                "correct": raw["correct"].strip().lower() == "true",
+                "probabilities": probabilities,
+                "features": features,
+            })
+    return tuple(rows)
+
+
+def evaluation_recommendations(row: Mapping[str, Any]) -> list[dict[str, Any]]:
+    family = str(row["predicted_family"])
+    confidence = float(row["confidence"])
+    actions: list[dict[str, Any]] = []
+
+    if not bool(row["correct"]):
+        actions.append({
+            "priority": "Evaluation",
+            "action": "Review this misclassified TEST flow and compare its feature pattern with both families.",
+            "problem": f"Ground truth is {row['true_family']}, while CatBoost predicted {family}.",
+            "evidence_sources": ["CICIoMT2024 Official TEST", "CatBoost prediction"],
+            "evidence": f"Prediction confidence={confidence:.1%}; this row was never used for training.",
+        })
+
+    family_actions = {
+        "DDoS": "Apply upstream DDoS filtering, rate limiting, and temporary source blocking after analyst confirmation.",
+        "DoS": "Rate-limit the suspected source and verify the availability of the affected IoMT service.",
+        "MQTT": "Restrict MQTT broker access, rotate credentials, and verify TLS and topic ACLs.",
+        "Recon": "Inspect adjacent firewall records for scanning behavior and block a confirmed scanning source.",
+        "Spoofing": "Inspect ARP tables and switch telemetry, then enable Dynamic ARP Inspection where supported.",
+        "Benign": "Retain the flow as baseline evidence and monitor only if similar activity becomes persistent.",
+    }
+    actions.append({
+        "priority": "High" if family != "Benign" else "Monitor",
+        "action": family_actions[family],
+        "problem": f"CatBoost classified this held-out flow as {family}.",
+        "evidence_sources": ["CICIoMT2024 CatBoost", "Official TEST replay"],
+        "evidence": f"Model confidence={confidence:.1%}; no external indicator was present in this flow row.",
+    })
+    actions.append({
+        "priority": "Review",
+        "action": "Validate the model result against surrounding packet, firewall, and endpoint telemetry before operational action.",
+        "problem": "A tabular flow record alone does not establish the full incident context.",
+        "evidence_sources": ["Local SOC policy"],
+        "evidence": "OTX, VirusTotal, OSV, and NVD require an applicable public indicator, CVE, or package identifier.",
+    })
+    return actions
+
+
+def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
+    predicted_family = str(row["predicted_family"])
+    confidence = float(row["confidence"])
+    attack_probability = confidence if predicted_family != "Benign" else 1.0 - confidence
+    risk_level = "high" if attack_probability >= 0.8 else "medium" if attack_probability >= 0.5 else "low"
+    provider_evidence = [
+        {
+            "provider_id": provider_id,
+            "provider": provider,
+            "configured": True,
+            "applicable": False,
+            "queried": False,
+            "available": False,
+            "status": "not_applicable",
+            "result": reason,
+            "observations": [],
+        }
+        for provider_id, provider, reason in (
+            ("otx", "AlienVault OTX", "Not queried: the official flow row contains no public IP, domain, URL, or hash."),
+            ("virustotal", "VirusTotal", "Not queried: the official flow row contains no public IP, domain, URL, or hash."),
+            ("osv", "OSV", "Not queried: the official flow row contains no package name and version."),
+            ("nvd", "NIST NVD", "Not queried: the official flow row contains no CVE or product identifier."),
+        )
+    ]
+    return {
+        "log_id": row["sample_id"],
+        "investigation_id": row["sample_id"],
+        "date": "Official TEST",
+        "timestamp": "Replay",
+        "category": "IoMT network flows",
+        "traffic_class": predicted_family,
+        "true_family": row["true_family"],
+        "prediction_correct": bool(row["correct"]),
+        "attack_subclass": row["attack_subclass"],
+        "department": "CICIoMT2024 model evaluation",
+        "source_ip": "Not supplied by flow dataset",
+        "destination_target": row["source_file"],
+        "source_dataset": row["source_dataset"],
+        "source_split": row["source_split"],
+        "source_row_number": row["source_row_number"],
+        "data_mb": 0.0,
+        "data_unit": "KB",
+        "is_threat": int(predicted_family != "Benign"),
+        "is_in_otx": False,
+        "risk_level": risk_level,
+        "risk_probability": round(attack_probability, 6),
+        "model_probability": round(confidence, 6),
+        "intel_verdict": "not applicable — no indicator in flow row",
+        "tlp": "TLP:AMBER" if predicted_family != "Benign" else "TLP:GREEN",
+        "evaluation_mode": True,
+        "features": row["features"],
+        "class_probabilities": row["probabilities"],
+        "provider_evidence": provider_evidence,
+        "indicator_evidence": [],
+        "recommended_actions": evaluation_recommendations(row),
+        "recommendation_method": (
+            "Evaluation guidance generated from the CatBoost family prediction. "
+            "The four CTI sources were not queried because the official flow row has no applicable indicator."
+        ),
+        "risk_reasons": [
+            f"Ground truth: {row['true_family']}.",
+            f"CatBoost prediction: {predicted_family} ({confidence:.1%}).",
+            "Correct prediction." if row["correct"] else "Incorrect prediction retained for transparent evaluation.",
+            "This unique row belongs only to the held-out CICIoMT2024 Official TEST split.",
+        ],
+        "model_details": {
+            "model": model_service.metadata["model_name"],
+            "predicted_family": predicted_family,
+            "confidence": confidence,
+            "probabilities": row["probabilities"],
+            "features": row["features"],
+        },
+    }
+
+
+# Keep the dedicated evaluation table synchronized without polluting the live
+# hospital_events, model_predictions, alerts, or CTI lookup tables.
+evaluation_database_sync = database.sync_evaluation_samples(load_official_test_replay())
 
 
 async def enrich_event(event: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -224,9 +384,9 @@ def dashboard_log(event: Mapping[str, Any], result: Mapping[str, Any]) -> dict[s
         "log_id": f"AI-{now.strftime('%H%M%S')}-{random.randint(100, 999)}",
         "date": now.strftime("%Y-%m-%d"),
         "timestamp": now.strftime("%H:%M:%S"),
-        "category": "System and device logs",
+        "category": "IoMT network flows",
         "traffic_class": prediction["predicted_family"],
-        "department": str(event.get("department") or "Hospital SOC integration test"),
+        "department": str(event.get("department") or "IoMT security test"),
         "source_ip": source_ip,
         "destination_target": destination,
         "data_mb": 0.0,
@@ -333,6 +493,37 @@ def database_status() -> Any:
 @app.get("/api/model")
 def model_info() -> Any:
     return jsonify(model_service.metadata)
+
+
+@app.get("/api/evaluation-samples")
+def evaluation_samples() -> Any:
+    try:
+        rows = load_official_test_replay()
+    except (FileNotFoundError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    reports = [evaluation_dashboard_log(row) for row in rows]
+    family_counts: dict[str, int] = {}
+    correct = 0
+    for row in rows:
+        family = str(row["true_family"])
+        family_counts[family] = family_counts.get(family, 0) + 1
+        correct += int(bool(row["correct"]))
+
+    total = len(rows)
+    return jsonify({
+        "samples": reports,
+        "summary": {
+            "total": total,
+            "correct": correct,
+            "incorrect": total - correct,
+            "accuracy": round(correct / total, 6) if total else 0.0,
+            "rows_per_family": family_counts,
+            "sampling": "50 unique rows per family, sampled without replacement",
+            "dataset": "CICIoMT2024",
+            "split": "Official TEST — never used for training or balancing",
+        },
+    })
 
 
 @app.get("/api/intelligence/status")

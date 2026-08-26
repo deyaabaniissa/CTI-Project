@@ -1,143 +1,105 @@
-# Healthcare Log Threat Model + CTI Fusion
+# Healthcare IoMT Cyber Threat Intelligence SOC
 
-This project evaluates patient-access, employee-activity, and hospital
-system/device logs. Each event receives an auditable rule assessment, a
-source-specific behavioral-model prediction, relevant live threat-intelligence
-evidence, and one final threat decision.
+This repository contains a secured IoMT network-intrusion investigation platform. A trained CatBoost classifier analyzes network-flow features, supported public indicators are enriched through four live threat-intelligence providers, and the complete evidence trail is stored for analyst review.
 
-## What is implemented
+## Model scope
 
-- Three separate class-balanced random-forest models: one per log stream.
-- Three output classes: `benign`, `suspicious`, and `threat`.
-- Human-readable labeling rules in `cti/rules.py`.
-- A 3,000-row analyst-review sample with 1,000 rows from each source.
-- Live routing to OTX/VirusTotal for public IP, domain, URL, and file-hash
-  reputation; OSV/NVD for CVE and GHSA vulnerability references.
-- A hybrid decision that keeps behavior, rules, IOC intelligence, and
-  vulnerability posture separate in the evidence trail.
+The deployed detector is **machine learning, not deep learning**.
 
-The source workbooks in `data/raw/` are preserved unchanged. The active
-processed dataset contains 30,000 events, 10,000 from each workbook.
+- Algorithm: CatBoost gradient boosting for tabular data.
+- Training dataset: official CICIoMT2024 attack traffic plus Wi-Fi profiling traffic used for the Benign class.
+- Input: 12 numeric network-flow features.
+- Output classes: `Benign`, `DDoS`, `DoS`, `MQTT`, `Recon`, and `Spoofing`.
+- Zero-row cleaning: a row is removed only when all 12 selected features are zero or missing.
+- Balancing: a maximum of 30,000 training rows per family, with minority-family oversampling recorded in the model artifact.
 
-## Safety and privacy boundaries
+The 12 required features are:
 
-Direct patient, employee, and device identities, names, descriptions,
-workstation IDs, raw IP addresses, threat-provider fields, threat references,
-rule labels, and analyst labels are not behavioral-model features. IDs are
-replaced by one-way local correlation tokens in the processed data.
+```text
+IAT, rst_count, Number, Tot size, psh_flag_number, Min,
+Rate, Header_Length, ack_count, Protocol Type, Tot sum, Max
+```
 
-Only supported public indicators are sent to external intelligence providers.
-Private/reserved IP addresses and clinical free text remain local.
+The deployed artifact is:
 
-## End-to-end workflow
+```text
+official_ciciomt2024_catboost_12_features_6_classes.joblib
+```
 
-Install dependencies and create the local environment file:
+## Evaluation
+
+### In-domain official CICIoMT2024 test
+
+The scientific evaluation uses all **47,711 untouched Official TEST rows**. The TEST split is never used for training, class balancing, feature selection, or tuning.
+
+| Metric | Score |
+| --- | ---: |
+| Accuracy | 95.42% |
+| Balanced accuracy | 93.88% |
+| Macro F1 | 91.28% |
+| Weighted F1 | 95.79% |
+| Held-out profiling Benign recall | 99.98% |
+
+### Website evaluation replay
+
+A deterministic replay of **300 unique CICIoMT2024 Official TEST rows** is stored at `data/evaluation/ciciomt2024_test_300_predictions.csv`. It contains 50 rows from each of `Benign`, `DDoS`, `DoS`, `MQTT`, `Recon`, and `Spoofing`, sampled without replacement.
+
+| Metric | Score |
+| --- | ---: |
+| Rows | 300 |
+| Correct predictions | 279 |
+| Incorrect predictions | 21 |
+| Replay accuracy | 93.00% |
+
+The replay powers the website's searchable TEST table and per-row PDF reports. It does not replace the full 47,711-row scientific evaluation. Each report shows the 12 feature values, six class probabilities, ground truth, prediction, and response guidance. The four CTI providers are marked `Not applicable` when a flow row contains no public IoC, CVE, or package identifier.
+
+Recreate the replay artifact from the official local TEST CSV files with:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-Copy-Item .env.example .env
+.\.venv\Scripts\python.exe prepare_ciciomt2024_test_replay.py
 ```
 
-Add available keys to `.env` and never commit it:
+## Investigation workflow
 
-```dotenv
-OTX_API_KEY=
-VIRUSTOTAL_API_KEY=
-NVD_API_KEY=
+```text
+IoMT network-flow event
+        |
+        v
+12-feature validation
+        |
+        v
+CatBoost machine-learning classification
+        |
+        +--> OTX and VirusTotal for public IP/domain/URL/hash evidence
+        |
+        +--> OSV and NVD for package/CVE/GHSA evidence
+        |
+        v
+Policy-based risk fusion and evidence-linked response actions
+        |
+        v
+PostgreSQL/Supabase or local SQLite persistence
 ```
 
-Prepare, label, and train:
+The four providers are routed by indicator type; an irrelevant source is not described as queried. The combined score is a policy-based risk score, not a calibrated probability. Response recommendations are deterministic and evidence-linked, not generated by a deep-learning or language model.
 
-```powershell
-.\.venv\Scripts\python.exe prepare_hospital_data.py
-.\.venv\Scripts\python.exe label_hospital_events.py
-.\.venv\Scripts\python.exe train_model.py --label-mode synthetic
-```
+## Implemented platform components
 
-These commands produce:
+- Flask API and authenticated WebSocket stream.
+- React security-operations interface.
+- CatBoost model loaded once at application startup.
+- Live AlienVault OTX, VirusTotal, OSV, and NIST NVD enrichment.
+- SQLite for local use or PostgreSQL/Supabase for persistent storage.
+- Stored network-flow events, predictions, indicators, provider responses, matches, alerts, and evidence.
+- A dedicated `model_evaluation_samples` table containing the 300 held-out replay rows; these records never enter the live event or alert tables.
+- Printable incident reports and model/EDA panels.
+- A clearly labeled end-to-end integration fixture that exercises CatBoost and all applicable CTI routes.
 
-- `data/processed/hospital_log_events.csv`: normalized operational events.
-- `data/processed/hospital_rule_labeled_events.csv`: rule-generated labels.
-- `data/processed/analyst_review_sample.csv`: privacy-minimized review sample.
-- `threat_model.pkl`: the three trained models and metadata.
-- `model_metrics.json`: chronological-holdout metrics and validation warnings.
+The WebSocket streams newly persisted investigations. It does not capture packets directly from a network interface. Production packet ingestion would require a flow extractor that produces the same 12-feature schema before calling the API.
 
-## Analyst review and human-label retraining
+## Install and run locally
 
-Open the analyst workbook in `outputs/019fbe91-0d15-71b2-a287-a62f3e533db9/`.
-Review the three yellow-column sheets, complete the analyst decision fields,
-and set completed rows to `Reviewed`. Do not overwrite the synthetic suggestion
-columns; they are retained for comparison and auditability.
-
-Then import the completed decisions and retrain:
-
-```powershell
-.\.venv\Scripts\python.exe import_analyst_reviews.py
-.\.venv\Scripts\python.exe train_model.py `
-  --label-mode human `
-  --human-labels data/processed/human_reviewed_labels.csv
-```
-
-Human-label training deliberately refuses incomplete data. Each source must
-contain all three classes and at least 100 reviewed examples per class. For a
-production claim, evaluate once more on a later time period that was not used
-for labeling or training.
-
-## What the current accuracy means
-
-The current synthetic-rule holdout results are:
-
-| Model | Accuracy | Threat precision | Threat recall | Threat false-positive rate |
-| --- | ---: | ---: | ---: | ---: |
-| Patient access | 100.00% | 100.00% | 100.00% | 0.00% |
-| Employee activity | 99.64% | 95.43% | 100.00% | 0.39% |
-| System/device | 99.96% | 100.00% | 100.00% | 0.00% |
-| Aggregate | 99.87% | 99.44% | 100.00% | 0.15% |
-
-These numbers measure how consistently the models reproduce the synthetic
-rules on the final 25% of events chronologically. They are a software-consistency
-check, not a measured real-world hospital threat-detection accuracy. The
-real-world accuracy is unknown until independent analysts label the sample and
-a future-time test set is evaluated.
-
-The acceptance targets encoded in training are threat recall at least 85%,
-threat precision at least 70%, and threat false-positive rate no more than 10%.
-
-## Intelligence routing and decision semantics
-
-| Reference | Databases checked | Authentication |
-| --- | --- | --- |
-| Public IP, domain, URL, MD5, SHA-1, SHA-256 | AlienVault OTX + VirusTotal | `OTX_API_KEY`, `VIRUSTOTAL_API_KEY` |
-| CVE | OSV + NIST NVD | No OSV key; optional `NVD_API_KEY` |
-| GHSA advisory | OSV, then NVD for CVE aliases | No OSV key; optional `NVD_API_KEY` |
-| Private/reserved/local IP | None; retained locally | Not transmitted |
-
-A malicious IOC can confirm active threat evidence. An OSV/NVD vulnerability
-match increases risk and remediation priority, but it is not by itself proof
-that the specific log event is an active attack.
-
-Every newly generated incident report contains an explicit row for all four
-providers. A row is marked `Queried — available`, `Not applicable`,
-`Applicable — not configured`, or `Queried — unavailable`, so the report never
-implies that an irrelevant database was checked. Recommended actions are built
-from the provider facts and the same log's rule/model context. Each action names
-the problem, evidence, and sources. When NVD returns a CISA required action, the
-report preserves that action; other response guidance is deterministic local
-policy informed by the API evidence, not advice claimed to come directly from
-the provider.
-
-Official references: [OSV API](https://google.github.io/osv.dev/api/),
-[NVD CVE API 2.0](https://nvd.nist.gov/developers/vulnerabilities),
-[VirusTotal API v3](https://docs.virustotal.com/reference/overview), and
-[AlienVault OTX DirectConnect](https://otx.alienvault.com/api).
-
-## Run
-
-The website now runs as one Flask application: Flask serves the built React
-dashboard, loads the official CICIoMT2024 CatBoost artifact once at startup,
-and exposes the threat-intelligence endpoints and WebSocket on the same port.
-
-Install the Python and frontend dependencies, then build the dashboard:
+Install Python and frontend dependencies:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
@@ -147,51 +109,39 @@ npm run build
 Set-Location ..
 ```
 
-Start the complete website:
+Copy `.env.example` to `.env`, then configure administrator credentials, a six-digit development verification code, a strong Flask secret, and any available CTI API keys. Never commit `.env`.
+
+For an entirely local database, keep:
+
+```dotenv
+SITE_DATABASE_URL=sqlite:///data/healthcare_cti.db
+```
+
+For a local PostgreSQL server, set `SITE_DATABASE_URL` to its SQLAlchemy PostgreSQL URL. For Supabase, keep `SUPABASE_DB_HOST`, `SUPABASE_DB_PORT`, `SUPABASE_DB_NAME`, `SUPABASE_DB_USER`, and `SUPABASE_DB_PASSWORD` server-side. Supabase is managed PostgreSQL; the same application schema and the 300-row replay work in either mode.
+
+Start the platform:
 
 ```powershell
 .\.venv\Scripts\python.exe flask_app.py
 ```
 
-Before starting, configure `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `DEV_OTP_CODE`,
-and `FLASK_SECRET_KEY` in the untracked `.env` file. Open
-`http://127.0.0.1:8000`, sign in with the administrator credentials and
-verification code, then use **Run end-to-end test** in the top bar to
-run the bundled unseen CICIoT2023 fixture through CatBoost and, in the same
-investigation, query AlienVault OTX, VirusTotal, OSV, and NIST NVD. The result
-contains the predicted attack family, confidence, provider evidence, fused risk
-score, and deterministic response recommendations.
+Open `http://127.0.0.1:8000` and sign in with the locally configured administrator credentials.
 
-Required deployment files are:
+## Main API routes
 
-- `flask_app.py` and the `cti/` package.
-- `official_ciciomt2024_catboost_12_features_6_classes.joblib`.
-- `end_to_end_integration_test_result.json` for the built-in integration test.
-- `cti-dashboard/dist/`, generated by `npm run build`.
-- `.env`, containing administrator secrets and provider keys. Never publish or
-  commit this file.
+All routes except health and administrator authentication require an authenticated session.
 
-Main endpoints (all except health and administrator login/session routes require
-an authenticated administrator session):
+- `POST /api/predict` or `POST /api/analyze`: classify one 12-feature flow and enrich supported indicators in the same event.
+- `POST /api/integration-sample/run`: execute the labeled model-plus-CTI integration fixture.
+- `POST /api/intelligence/lookup`: query one supported public indicator.
+- `GET /api/intelligence/status`: report provider configuration and availability without exposing keys.
+- `GET /api/model`: return CatBoost type, features, classes, metrics, balance audit, and feature importance.
+- `GET /api/evaluation-samples`: return the 300 unique Official TEST predictions and their per-row report data.
+- `GET /api/database/status`: return the selected database backend and persisted row counts.
+- `GET /api/investigations`: return stored dashboard investigations.
+- `WS /ws/live-logs`: stream newly stored investigations.
 
-- `POST /api/predict` or `POST /api/analyze`: classify one 12-feature network
-  flow and enrich any supported indicators in the same JSON object.
-- `POST /api/integration-sample/run`: run the bundled model-plus-four-sources
-  integration test.
-- `POST /api/intelligence/lookup`: check one IP, domain, URL, hash, CVE, or GHSA.
-- `GET /api/intelligence/status`: provider configuration and health without keys.
-- `GET /api/model`: training metadata, features, exclusions, and metrics.
-- `GET /api/health`: minimal deployment liveness without sensitive metadata.
-- `GET /api/database/status`: active SQLite/PostgreSQL backend and stored row counts.
-- `GET /api/investigations`: persisted dashboard investigation records.
-- `WS /ws/live-logs`: stream classified events to the dashboard.
-
-The authentication cookie is HTTP-only, SameSite Strict, and time limited. Set
-`SESSION_COOKIE_SECURE=true` whenever HTTPS is used. The API and WebSocket are
-protected by the same server-side session; hiding the dashboard in React alone
-is not treated as access control.
-
-Example CatBoost classification and CTI enrichment:
+## Example analysis request
 
 ```powershell
 $body = @{
@@ -207,8 +157,8 @@ $body = @{
   'Protocol Type' = 6.0
   'Tot sum' = 567.0
   Max = 54.0
-  src_ip = "182.54.217.2"
-  cve_id = "CVE-2021-44228"
+  src_ip = '182.54.217.2'
+  cve_id = 'CVE-2021-44228'
   asset_criticality = 0.95
 } | ConvertTo-Json
 
@@ -218,65 +168,34 @@ Invoke-RestMethod http://127.0.0.1:8000/api/predict `
 
 ## Database modes
 
-No Docker installation is required for the first run. When
-`SITE_DATABASE_URL` is not set, the Flask application creates
-`data/healthcare_cti.db` and uses SQLite. Each analysis stores the hospital
-event, CatBoost prediction, extracted indicators, provider responses, CTI
-matches, alert, and alert evidence in the same 25-table schema used by
-PostgreSQL.
+SQLite requires no Docker or remote service. PostgreSQL can be run with `compose.yaml`, while Supabase can be configured using the separate `SUPABASE_DB_*` environment variables. Database passwords and service-role credentials must remain server-side.
 
-Check the active database:
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8000/api/database/status
-```
-
-After Docker Desktop is installed, copy the safe example settings into `.env`,
-keep the existing API keys, and replace every placeholder password:
-
-```powershell
-docker compose up --build -d
-docker compose ps
-```
-
-The services are:
-
-- Website and Flask API: `http://127.0.0.1:8000`
-- PostgreSQL: `127.0.0.1:5432`
-- pgAdmin: `http://127.0.0.1:5050`
-
-Inside pgAdmin, register the server with host `db`, port `5432`, database
-`healthcare_cti`, username `healthcare_cti`, and the `POSTGRES_PASSWORD` value
-from `.env`. PostgreSQL data is kept in the named `postgres_data` volume when
-containers stop or restart. Do not run `docker compose down -v` unless the
-database is intentionally being deleted.
-
-## PostgreSQL import (optional)
-
-Set `DATABASE_URL`, apply the migration, and import the processed events and
-model metadata:
-
-```powershell
-.\.venv\Scripts\alembic.exe upgrade head
-.\.venv\Scripts\python.exe import_static_data.py
-```
-
-Provider responses, extracted references, model predictions, final alerts, and
-evidence remain separate in the persistence layer for auditability.
-
-## Supabase PostgreSQL
-
-The Flask backend can use the Supabase Session Pooler without embedding the
-database password in a URI. Copy the five settings from
-`.env.supabase.example` into `.env`, enter the database password locally, and
-remove or comment out `SITE_DATABASE_URL` so it does not keep selecting SQLite.
-The configured pooler uses TLS (`sslmode=require`) automatically.
-
-Initialize the remote schema once, then restart Flask:
+Apply schema migrations with:
 
 ```powershell
 .\.venv\Scripts\alembic.exe upgrade head
 ```
 
-Never expose `SUPABASE_DB_PASSWORD` or a service-role key to the React client.
-Only the Flask backend should connect directly to PostgreSQL.
+## Verification
+
+Run the Python test suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Build the production frontend:
+
+```powershell
+Set-Location cti-dashboard
+npm run build
+```
+
+## Security and scientific boundaries
+
+- Only supported public indicators are sent to external CTI providers; private and reserved IP addresses remain local.
+- The API and WebSocket are protected by the same server-side administrator session.
+- Authentication cookies are HTTP-only and SameSite Strict. Enable `SESSION_COOKIE_SECURE=true` when HTTPS is used.
+- The CICIoMT2024 score measures in-domain performance. It is not claimed as universal hospital-network accuracy.
+- The current platform is an IoMT security prototype and does not contain manufactured patient, employee, or hospital-operations training data.
+- CatBoost is a machine-learning gradient-boosting model; it is not a deep-learning model.

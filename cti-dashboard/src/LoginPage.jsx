@@ -192,10 +192,10 @@ export default function LoginPage({ onLoginSuccess }) {
       <aside className="login-intel" aria-label="Protected security platform overview">
         <div>
           <p className="eyebrow">Protected security operations</p>
-          <h2>Monitor hospital activity and investigate cyber threats from one secured platform.</h2>
+          <h2>Analyze IoMT network flows and investigate cyber threats from one secured platform.</h2>
         </div>
         <dl>
-          <div><dt><ShieldCheck size={17} />Detection</dt><dd>CatBoost analysis of hospital and IoMT network flows</dd></div>
+          <div><dt><ShieldCheck size={17} />Detection</dt><dd>CatBoost machine-learning analysis of IoMT network flows</dd></div>
           <div><dt><Globe2 size={17} />Intelligence</dt><dd>OTX, VirusTotal, NVD, and OSV enrichment</dd></div>
           <div><dt><FileText size={17} />Response</dt><dd>Persisted alerts, recommendations, and incident reports</dd></div>
         </dl>

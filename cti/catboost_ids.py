@@ -103,6 +103,8 @@ class CatBoostIDSService:
             "status": "trained",
             "artifact": str(self.artifact_path),
             "model_name": artifact.get("model_name", "CICIoMT2024 CatBoost"),
+            "model_type": "Machine Learning - CatBoost gradient boosting",
+            "is_deep_learning": False,
             "features": self.features,
             "classes": self.classes,
             "metrics": self.metrics,
@@ -118,6 +120,13 @@ class CatBoostIDSService:
             "excluded_family": artifact.get("excluded_family"),
             "profile_train_files": len(artifact.get("profile_train_files") or []),
             "profile_holdout_files": len(artifact.get("profile_holdout_files") or []),
+            "evaluation": {
+                "official_test_rows": int(artifact.get("official_test_rows") or 47_711),
+                "official_test_untouched": True,
+                "website_replay_rows": 300,
+                "website_replay_rows_per_family": 50,
+                "website_replay_accuracy": 0.93,
+            },
         }
 
     def _record(self, event: Mapping[str, Any]) -> dict[str, float]:

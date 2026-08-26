@@ -41,6 +41,7 @@ const WS_URL =
   `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/live-logs`;
 const LOG_STORAGE_KEY = 'healthcare_soc_logs_v8';
 const MAX_LOGS = 120;
+const EVALUATION_PAGE_SIZE = 25;
 const PROVIDER_ORDER = ['otx', 'virustotal', 'osv', 'nvd'];
 const PROVIDER_NAMES = {
   otx: 'AlienVault OTX',
@@ -55,12 +56,13 @@ const DEDICATED_REPORT_FIELDS = new Set([
   'recommendation_method',
   'risk_reasons',
   'vulnerability_posture',
+  'features',
+  'class_probabilities',
+  'model_details',
 ]);
 
 const CATEGORY_META = {
-  'Patient access logs': { label: 'Patient access', icon: Eye, color: '#61b4d8' },
-  'Employee activity logs': { label: 'Employee activity', icon: Activity, color: '#e6a23c' },
-  'System and device logs': { label: 'Systems & devices', icon: Cpu, color: '#e85d75' },
+  'IoMT network flows': { label: 'IoMT network flows', icon: Radio, color: '#61b4d8' },
 };
 
 const TLP_META = {
@@ -106,7 +108,7 @@ const toFiniteNumber = (value, fallback = 0) => {
 const normalizeLog = (log) => ({
   ...log,
   log_id: String(log.log_id || `LOG-${Date.now()}`),
-  category: String(log.category || (log.traffic_class ? 'System and device logs' : 'Unknown')),
+  category: 'IoMT network flows',
   department: String(log.department || 'General'),
   destination_target: String(log.destination_target || '0.0.0.0'),
   source_ip: String(log.source_ip || '0.0.0.0'),
@@ -331,6 +333,16 @@ const buildReportHtml = (log) => {
     .join('');
   const posture = log.vulnerability_posture || {};
   const postureSummary = `State ${posture.state || 'not recorded'}; ${toFiniteNumber(posture.packages_scanned)} packages scanned; ${toFiniteNumber(posture.vulnerability_count)} vulnerabilities; maximum CVSS ${toFiniteNumber(posture.max_cvss).toFixed(1)}.`;
+  const featureRows = Object.entries(log.features || {})
+    .map(([feature, value]) => `<tr><th>${escapeHtml(feature)}</th><td>${escapeHtml(value)}</td></tr>`)
+    .join('');
+  const probabilityRows = Object.entries(log.class_probabilities || {})
+    .map(([family, value]) => `<tr><th>${escapeHtml(family)}</th><td>${escapeHtml(`${(toFiniteNumber(value) * 100).toFixed(2)}%`)}</td></tr>`)
+    .join('');
+  const reportTitle = log.evaluation_mode ? 'Official TEST Evaluation Report' : 'Incident Report';
+  const reportDescription = log.evaluation_mode
+    ? 'Generated from a held-out CICIoMT2024 Official TEST row; this record was never used for training or balancing.'
+    : 'Generated from an analyzed IoMT network-flow event and its CTI evidence.';
 
   return `<!doctype html>
 <html lang="en">
@@ -368,8 +380,8 @@ const buildReportHtml = (log) => {
     <main>
       <header>
         <div>
-          <h1>Healthcare CTI SOC Incident Report</h1>
-          <p>Report for ${escapeHtml(log.log_id)} generated from live hospital telemetry.</p>
+          <h1>Healthcare CTI SOC ${escapeHtml(reportTitle)}</h1>
+          <p>${escapeHtml(reportDescription)}</p>
         </div>
         <span class="badge">${escapeHtml(log.tlp)}</span>
       </header>
@@ -380,6 +392,8 @@ const buildReportHtml = (log) => {
       </section>
       <h2>Log Details</h2>
       <table><tbody>${rows}</tbody></table>
+      ${featureRows ? `<h2>12 Model Features</h2><table><tbody>${featureRows}</tbody></table>` : ''}
+      ${probabilityRows ? `<h2>Class Probabilities</h2><table><tbody>${probabilityRows}</tbody></table>` : ''}
       <h2>Four-Database Evidence</h2>
       <table class="provider-table">
         <thead><tr><th>Provider</th><th>Query status</th><th>API result for this log</th></tr></thead>
@@ -447,6 +461,20 @@ export default function Dashboard({ onLogout }) {
   const [intelligenceLoading, setIntelligenceLoading] = useState(false);
   const [integrationLoading, setIntegrationLoading] = useState(false);
   const [integrationMessage, setIntegrationMessage] = useState('');
+  const [evaluationSamples, setEvaluationSamples] = useState([]);
+  const [evaluationSummary, setEvaluationSummary] = useState({
+    total: 0,
+    correct: 0,
+    incorrect: 0,
+    accuracy: 0,
+    rows_per_family: {},
+  });
+  const [evaluationLoading, setEvaluationLoading] = useState(true);
+  const [evaluationError, setEvaluationError] = useState('');
+  const [evaluationFamily, setEvaluationFamily] = useState('ALL');
+  const [evaluationResult, setEvaluationResult] = useState('ALL');
+  const [evaluationQuery, setEvaluationQuery] = useState('');
+  const [evaluationPage, setEvaluationPage] = useState(1);
   const reportRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const retryRef = useRef(0);
@@ -572,6 +600,33 @@ export default function Dashboard({ onLogout }) {
     return () => window.clearInterval(intervalId);
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    const loadEvaluationSamples = async () => {
+      setEvaluationLoading(true);
+      setEvaluationError('');
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/evaluation-samples`);
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || payload.detail || 'Unable to load official TEST samples.');
+        }
+        if (active) {
+          setEvaluationSamples((payload.samples || []).map(normalizeLog));
+          setEvaluationSummary(payload.summary || {});
+        }
+      } catch (error) {
+        if (active) setEvaluationError(error.message || 'Unable to load official TEST samples.');
+      } finally {
+        if (active) setEvaluationLoading(false);
+      }
+    };
+    loadEvaluationSamples();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const stats = useMemo(() => {
     const totals = logs.reduce(
       (acc, log) => {
@@ -646,6 +701,39 @@ export default function Dashboard({ onLogout }) {
       return matchesCategory && matchesTlp && matchesDate && matchesFrom && matchesTo && matchesQuery;
     });
   }, [filters, logs]);
+
+  const filteredEvaluationSamples = useMemo(() => {
+    const query = evaluationQuery.trim().toLowerCase();
+    return evaluationSamples.filter((sample) => {
+      const familyMatches = evaluationFamily === 'ALL' || sample.true_family === evaluationFamily;
+      const resultMatches =
+        evaluationResult === 'ALL' ||
+        (evaluationResult === 'CORRECT' && sample.prediction_correct) ||
+        (evaluationResult === 'INCORRECT' && !sample.prediction_correct);
+      const text = [
+        sample.log_id,
+        sample.true_family,
+        sample.traffic_class,
+        sample.attack_subclass,
+        sample.destination_target,
+      ].join(' ').toLowerCase();
+      return familyMatches && resultMatches && (!query || text.includes(query));
+    });
+  }, [evaluationSamples, evaluationFamily, evaluationResult, evaluationQuery]);
+
+  const evaluationPageCount = Math.max(1, Math.ceil(filteredEvaluationSamples.length / EVALUATION_PAGE_SIZE));
+  const visibleEvaluationSamples = filteredEvaluationSamples.slice(
+    (evaluationPage - 1) * EVALUATION_PAGE_SIZE,
+    evaluationPage * EVALUATION_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setEvaluationPage(1);
+  }, [evaluationFamily, evaluationResult, evaluationQuery]);
+
+  useEffect(() => {
+    if (evaluationPage > evaluationPageCount) setEvaluationPage(evaluationPageCount);
+  }, [evaluationPage, evaluationPageCount]);
 
   const categoryData = Object.entries(CATEGORY_META).map(([key, meta]) => ({
     key,
@@ -756,6 +844,10 @@ export default function Dashboard({ onLogout }) {
             <Cpu size={18} />
             Model & EDA
           </a>
+          <a href="#test-replay">
+            <CheckCircle2 size={18} />
+            TEST Replay
+          </a>
           <a href="#intelligence">
             <Globe2 size={18} />
             Intelligence
@@ -768,8 +860,8 @@ export default function Dashboard({ onLogout }) {
 
         <div className="side-status">
           <span>Detection pipeline</span>
-          <strong>CatBoost IDS + 4 CTI APIs</strong>
-          <p>CatBoost classifies 12 flow features. OSV, NVD, OTX, and VirusTotal then enrich matching indicators.</p>
+          <strong>Machine Learning IDS + 4 CTI APIs</strong>
+          <p>CatBoost machine learning classifies 12 flow features. OSV, NVD, OTX, and VirusTotal then enrich matching indicators.</p>
         </div>
       </aside>
 
@@ -779,9 +871,9 @@ export default function Dashboard({ onLogout }) {
             <p className="eyebrow">University Hospital Security Platform</p>
             <h1 id="platform-title">Healthcare Cyber Threat Intelligence SOC</h1>
             <p>
-              Monitor patient access, employee activity, and system/device logs in one place. The platform
-              detects suspicious network behavior, enriches security indicators with live threat intelligence,
-              and produces explainable alerts and incident response recommendations.
+              Analyze IoMT network-flow events in one place. The platform uses a CatBoost machine-learning
+              model to detect suspicious behavior, enriches supported indicators with live threat intelligence,
+              and produces explainable alerts and incident-response recommendations.
             </p>
           </div>
           <div className="intro-capabilities" aria-label="Platform capabilities">
@@ -873,9 +965,9 @@ export default function Dashboard({ onLogout }) {
             <div>
               <p className="eyebrow">Model validation & EDA</p>
               <h2>CatBoost performance and feature interpretation</h2>
-              <p className="section-description">Held-out CICIoMT2024 test metrics and the feature importance learned by the deployed artifact.</p>
+              <p className="section-description">Held-out CICIoMT2024 metrics for CatBoost gradient boosting: a machine-learning model, not a deep-learning neural network.</p>
             </div>
-            <span className="model-badge">CatBoost · {modelInfo.features?.length || 12} features</span>
+            <span className="model-badge">Machine Learning · CatBoost · {modelInfo.features?.length || 12} features</span>
           </div>
           <div className="eda-grid">
             <div className="validation-panel">
@@ -884,6 +976,13 @@ export default function Dashboard({ onLogout }) {
                 <ValidationMetric label="Balanced accuracy" value={modelMetrics.balanced_accuracy} />
                 <ValidationMetric label="Macro F1" value={modelMetrics.macro_f1} />
                 <ValidationMetric label="Weighted F1" value={modelMetrics.weighted_f1} />
+              </div>
+              <div className="validation-audit-line">
+                <ShieldCheck size={16} />
+                <span>
+                  Full scientific evaluation: <strong>{Number(modelInfo.evaluation?.official_test_rows || 47711).toLocaleString()}</strong> untouched Official TEST rows.
+                  Website replay: <strong>{Number(modelInfo.evaluation?.website_replay_rows || 300)}</strong> unique rows at <strong>{(toFiniteNumber(modelInfo.evaluation?.website_replay_accuracy || 0.93) * 100).toFixed(1)}%</strong> sample accuracy.
+                </span>
               </div>
               <div className="pipeline-explainer">
                 <div><span>1</span><strong>Detect</strong><p>CatBoost classifies 12 numeric flow features.</p></div>
@@ -901,6 +1000,115 @@ export default function Dashboard({ onLogout }) {
               ))}
             </div>
           </div>
+        </section>
+
+        <section className="evaluation-replay surface" id="test-replay" aria-label="CICIoMT2024 Official TEST replay">
+          <div className="section-heading evaluation-heading">
+            <div>
+              <p className="eyebrow">Held-out model evaluation</p>
+              <h2>300-sample Official TEST replay</h2>
+              <p className="section-description">
+                Fifty unique rows from each of the six CICIoMT2024 families, sampled without replacement.
+                These rows are used only for prediction and reporting—never for training, balancing, or tuning.
+              </p>
+            </div>
+            <span className="model-badge">Official TEST · 50 × 6 families</span>
+          </div>
+
+          <div className="evaluation-summary" aria-label="Replay summary">
+            <div><span>Samples</span><strong>{evaluationSummary.total || 300}</strong></div>
+            <div><span>Correct</span><strong>{evaluationSummary.correct || 0}</strong></div>
+            <div><span>Incorrect</span><strong>{evaluationSummary.incorrect || 0}</strong></div>
+            <div><span>Sample accuracy</span><strong>{`${(toFiniteNumber(evaluationSummary.accuracy) * 100).toFixed(1)}%`}</strong></div>
+          </div>
+
+          <div className="evaluation-family-strip" aria-label="Rows per true family">
+            {(modelInfo.classes || ['Benign', 'DDoS', 'DoS', 'MQTT', 'Recon', 'Spoofing']).map((family) => (
+              <span key={family} style={{ '--family-color': FAMILY_COLORS[family] || FAMILY_COLORS.Unknown }}>
+                <i />{family} <strong>{evaluationSummary.rows_per_family?.[family] || 0}</strong>
+              </span>
+            ))}
+          </div>
+
+          <div className="evaluation-controls">
+            <div className="search-shell">
+              <Search size={18} />
+              <input
+                value={evaluationQuery}
+                onChange={(event) => setEvaluationQuery(event.target.value)}
+                placeholder="Search sample, subclass, true or predicted family"
+              />
+            </div>
+            <FilterSelect label="True family" value={evaluationFamily} onChange={setEvaluationFamily}>
+              <option value="ALL">All six families</option>
+              {(modelInfo.classes || []).map((family) => <option key={family} value={family}>{family}</option>)}
+            </FilterSelect>
+            <FilterSelect label="Result" value={evaluationResult} onChange={setEvaluationResult}>
+              <option value="ALL">All predictions</option>
+              <option value="CORRECT">Correct only</option>
+              <option value="INCORRECT">Incorrect only</option>
+            </FilterSelect>
+          </div>
+
+          {evaluationLoading ? (
+            <div className="evaluation-state"><RefreshCw className="spin" size={22} />Loading 300 held-out samples…</div>
+          ) : evaluationError ? (
+            <div className="evaluation-state error"><AlertTriangle size={22} />{evaluationError}</div>
+          ) : (
+            <>
+              <div className="evaluation-table-wrap">
+                <table className="evaluation-table">
+                  <thead>
+                    <tr>
+                      <th>Sample</th>
+                      <th>True family</th>
+                      <th>Prediction</th>
+                      <th>Confidence</th>
+                      <th>Result</th>
+                      <th>Official source row</th>
+                      <th>Report</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleEvaluationSamples.map((sample) => (
+                      <tr key={sample.log_id}>
+                        <td><strong>{sample.log_id}</strong><small>{sample.attack_subclass}</small></td>
+                        <td><span className="family-pill" style={{ '--family-color': FAMILY_COLORS[sample.true_family] || FAMILY_COLORS.Unknown }}>{sample.true_family}</span></td>
+                        <td><span className="family-pill" style={{ '--family-color': FAMILY_COLORS[sample.traffic_class] || FAMILY_COLORS.Unknown }}>{sample.traffic_class}</span></td>
+                        <td>{(toFiniteNumber(sample.model_probability) * 100).toFixed(1)}%</td>
+                        <td>
+                          <span className={`evaluation-result ${sample.prediction_correct ? 'correct' : 'incorrect'}`}>
+                            {sample.prediction_correct ? <CheckCircle2 size={14} /> : <X size={14} />}
+                            {sample.prediction_correct ? 'Correct' : 'Incorrect'}
+                          </span>
+                        </td>
+                        <td><small>{sample.destination_target}<br />row {sample.source_row_number}</small></td>
+                        <td>
+                          <div className="evaluation-actions">
+                            <button type="button" onClick={() => handlePreviewReport(sample)}><Eye size={15} />Preview</button>
+                            <button type="button" onClick={() => handleInstallReport(sample)}><Download size={15} />PDF</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="evaluation-pagination">
+                <span>
+                  Showing {filteredEvaluationSamples.length ? (evaluationPage - 1) * EVALUATION_PAGE_SIZE + 1 : 0}–{Math.min(evaluationPage * EVALUATION_PAGE_SIZE, filteredEvaluationSamples.length)} of {filteredEvaluationSamples.length}
+                </span>
+                <div>
+                  <button type="button" disabled={evaluationPage <= 1} onClick={() => setEvaluationPage((page) => page - 1)}>Previous</button>
+                  <strong>Page {evaluationPage} / {evaluationPageCount}</strong>
+                  <button type="button" disabled={evaluationPage >= evaluationPageCount} onClick={() => setEvaluationPage((page) => page + 1)}>Next</button>
+                </div>
+              </div>
+              <p className="dataset-note evaluation-note">
+                OTX, VirusTotal, OSV, and NVD are shown in every report. They are marked “Not applicable” for these rows because the official flow CSV contains numeric traffic features—not a public IoC, CVE, or package identifier.
+              </p>
+            </>
+          )}
         </section>
 
         <section className="intelligence-surface surface" id="intelligence" aria-label="Live intelligence sources">
@@ -1325,14 +1533,20 @@ function ReportDocument({ log, reportRef }) {
   const providers = getProviderRows(log);
   const reasons = Array.isArray(log.risk_reasons) ? log.risk_reasons : [];
   const posture = log.vulnerability_posture || {};
+  const features = Object.entries(log.features || {});
+  const probabilities = Object.entries(log.class_probabilities || {});
 
   return (
     <article className="report-document" ref={reportRef}>
       <header className="report-header">
         <div>
           <p>Healthcare CTI SOC</p>
-          <h1>Incident Report</h1>
-          <span>Generated from live hospital telemetry and TLP classification.</span>
+          <h1>{log.evaluation_mode ? 'Official TEST Evaluation Report' : 'Incident Report'}</h1>
+          <span>
+            {log.evaluation_mode
+              ? 'Generated from a held-out CICIoMT2024 Official TEST row that was never used for training or balancing.'
+              : 'Generated from an analyzed IoMT network-flow event and its CTI evidence.'}
+          </span>
         </div>
         <strong style={{ backgroundColor: tlpMeta.color }}>{log.tlp}</strong>
       </header>
@@ -1351,6 +1565,31 @@ function ReportDocument({ log, reportRef }) {
           <strong>{log.date} {log.timestamp}</strong>
         </div>
       </section>
+
+      {features.length > 0 && (
+        <section className="report-section report-model-grid">
+          <div>
+            <h2>12 Model Features</h2>
+            <div className="report-table-wrap">
+              <table><tbody>
+                {features.map(([feature, value]) => (
+                  <tr key={feature}><th>{feature}</th><td>{String(value)}</td></tr>
+                ))}
+              </tbody></table>
+            </div>
+          </div>
+          <div>
+            <h2>Class Probabilities</h2>
+            <div className="report-table-wrap">
+              <table><tbody>
+                {probabilities.map(([family, value]) => (
+                  <tr key={family}><th>{family}</th><td>{(toFiniteNumber(value) * 100).toFixed(2)}%</td></tr>
+                ))}
+              </tbody></table>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="report-section">
         <h2>Full Log Details</h2>

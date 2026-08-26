@@ -1,8 +1,4 @@
-"""SQLAlchemy ORM schema for static hospital telemetry and live CTI evidence.
-
-Clinical context is deliberately separate from security detection.  The only
-patient reference that can be linked to an event is a local synthetic token.
-"""
+"""SQLAlchemy ORM schema for IoMT network-flow investigations and CTI evidence."""
 
 from __future__ import annotations
 
@@ -37,7 +33,6 @@ def utcnow() -> datetime:
 
 class DataSourceType(str, enum.Enum):
     telemetry = "telemetry"
-    synthetic_patient = "synthetic_patient"
     asset_inventory = "asset_inventory"
     sbom = "sbom"
     cti = "cti"
@@ -208,18 +203,6 @@ class SbomComponent(UUIDPrimaryKey, Timestamped, Base):
     purl: Mapped[str | None] = mapped_column(String(2048))
 
 
-class SyntheticPatientContext(UUIDPrimaryKey, Timestamped, Base):
-    __tablename__ = "synthetic_patient_context"
-    __table_args__ = (UniqueConstraint("patient_token", name="uq_synthetic_patient_token"),)
-
-    data_source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("data_sources.id", ondelete="RESTRICT"), nullable=False)
-    patient_token: Mapped[str] = mapped_column(String(64), nullable=False)
-    administrative_gender: Mapped[str | None] = mapped_column(String(32))
-    condition_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    observation_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    encounter_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-
-
 class HospitalEvent(UUIDPrimaryKey, Timestamped, Base):
     __tablename__ = "hospital_events"
     __table_args__ = (
@@ -242,15 +225,6 @@ class HospitalEvent(UUIDPrimaryKey, Timestamped, Base):
     packets: Mapped[int | None] = mapped_column(Integer)
     flow_features: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     dataset_label: Mapped[int | None] = mapped_column(Integer)
-
-
-class EventPatientLink(UUIDPrimaryKey, Timestamped, Base):
-    __tablename__ = "event_patient_links"
-    __table_args__ = (UniqueConstraint("event_id", "patient_context_id", name="uq_event_patient_link"),)
-
-    event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hospital_events.id", ondelete="CASCADE"), nullable=False)
-    patient_context_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("synthetic_patient_context.id", ondelete="CASCADE"), nullable=False)
-    relationship_type: Mapped[str] = mapped_column(String(64), default="synthetic_context", nullable=False)
 
 
 class Indicator(UUIDPrimaryKey, Timestamped, Base):
@@ -359,6 +333,33 @@ class ModelPrediction(UUIDPrimaryKey, Timestamped, Base):
     predicted_class: Mapped[str] = mapped_column(String(64), nullable=False)
     feature_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     predicted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class ModelEvaluationSample(UUIDPrimaryKey, Timestamped, Base):
+    """A held-out dataset row used only for transparent model evaluation."""
+
+    __tablename__ = "model_evaluation_samples"
+    __table_args__ = (
+        UniqueConstraint("sample_key", name="uq_model_evaluation_samples_sample_key"),
+        Index("ix_model_evaluation_samples_true_family", "true_family"),
+        Index("ix_model_evaluation_samples_correct", "correct"),
+    )
+
+    model_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("model_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    sample_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    dataset_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    dataset_split: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_file: Mapped[str] = mapped_column(String(512), nullable=False)
+    source_row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    attack_subclass: Mapped[str] = mapped_column(String(160), nullable=False)
+    true_family: Mapped[str] = mapped_column(String(64), nullable=False)
+    predicted_family: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    feature_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    class_probabilities: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
 
 class Alert(UUIDPrimaryKey, Timestamped, Base):

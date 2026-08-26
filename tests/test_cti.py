@@ -4,8 +4,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from cti.intelligence import ThreatIntelligenceService, classify_indicator, is_public_indicator
-from cti.model import ThreatRiskEngine
-from cti.rules import assess_rules
 
 
 class IndicatorTests(unittest.TestCase):
@@ -50,80 +48,6 @@ class IntelligenceRoutingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["coverage"]["applicable_sources"], ["osv", "nvd"])
             service._lookup_osv_reference.assert_awaited_once()
             service._lookup_nvd.assert_awaited_once()
-
-
-class RiskFusionTests(unittest.TestCase):
-    def test_live_intelligence_increases_risk(self):
-        with tempfile.TemporaryDirectory() as directory:
-            engine = ThreatRiskEngine(Path(directory) / "missing.pkl")
-            event = {
-                "frame_length": 64,
-                "dst_port": 1883,
-                "tcp_ack": 1,
-                "ip_ttl": 64,
-            }
-            clean = engine.score(event, {}, {})
-            malicious = engine.score(
-                event,
-                {"confidence": 0.95, "verdict": "malicious"},
-                {},
-            )
-            self.assertGreater(malicious["probability"], clean["probability"])
-            self.assertEqual(malicious["is_threat"], 1)
-
-    def test_vulnerability_evidence_is_not_active_attack_proof(self):
-        with tempfile.TemporaryDirectory() as directory:
-            engine = ThreatRiskEngine(Path(directory) / "missing.pkl")
-            event = {
-                "log_type": "employee_activity",
-                "actor_role": "Nurse",
-                "action": "Login",
-                "status": "Success",
-            }
-            result = engine.score(
-                event,
-                {"confidence": 0.95, "verdict": "vulnerable"},
-                {},
-            )
-            self.assertEqual(result["is_threat"], 0)
-            self.assertEqual(result["final_classification"], "suspicious")
-            self.assertEqual(result["evidence"]["external_verdict"], "vulnerable")
-
-
-class AuditableRuleTests(unittest.TestCase):
-    def test_patient_unauthorized_attempt_is_threat(self):
-        result = assess_rules(
-            {
-                "log_type": "patient_access",
-                "status": "Unauthorized Attempt",
-                "action": "View",
-            }
-        )
-        self.assertEqual(result.label, "threat")
-        self.assertEqual(result.rule_id, "PAT-001")
-
-    def test_normal_employee_login_is_benign(self):
-        result = assess_rules(
-            {
-                "log_type": "employee_activity",
-                "actor_role": "Nurse",
-                "action": "Login",
-                "status": "Success",
-            }
-        )
-        self.assertEqual(result.label, "benign")
-        self.assertEqual(result.rule_id, "EMP-100")
-
-    def test_port_scan_is_threat_even_when_blocked(self):
-        result = assess_rules(
-            {
-                "log_type": "system_device",
-                "action": "Network Port Scan",
-                "status": "Blocked",
-            }
-        )
-        self.assertEqual(result.label, "threat")
-        self.assertEqual(result.rule_id, "SYS-002")
 
 
 if __name__ == "__main__":

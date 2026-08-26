@@ -1,4 +1,4 @@
-"""Privacy-preserving extraction of security indicators from static telemetry.
+"""Privacy-preserving extraction of security indicators from IoMT events.
 
 Only explicitly security-relevant fields are examined.  Patient context, free
 text clinical notes, and arbitrary metadata are intentionally never parsed or

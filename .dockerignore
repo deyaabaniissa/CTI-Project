@@ -9,7 +9,6 @@ cti-dashboard/node_modules
 cti-dashboard/dist
 data/*.db*
 data/archive
-data/processed
 data/raw
 outputs
 output
@@ -17,5 +16,4 @@ video_frames
 *.ipynb
 *.xlsx
 *.zip
-threat_model.pkl
 end_to_end_integration_test_result.json

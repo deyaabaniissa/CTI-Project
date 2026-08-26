@@ -1,6 +1,7 @@
 .env
 .venv/
 .tools/
+.pnpm-store/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -13,11 +14,13 @@ data/*.db-shm
 data/*.db-wal
 video_frames/
 data/archive/
-data/processed/
 data/raw/
+CIC dataset/
+test_23.csv
+wustl-ehms-2020_with_attacks_categories*.csv
+data/evaluation/ciciot2023_*
 output/
 outputs/
 tmp/
-threat_model.pkl
 end_to_end_integration_test_result.json
 alembic.ini.bak

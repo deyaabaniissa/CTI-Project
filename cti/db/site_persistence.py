@@ -23,6 +23,7 @@ from cti.db.models import (
     HospitalEvent,
     Indicator,
     IndicatorType,
+    ModelEvaluationSample,
     ModelPrediction,
     ModelVersion,
     ProviderName,
@@ -99,6 +100,7 @@ class SitePersistenceService:
                 for name, model in {
                     "hospital_events": HospitalEvent,
                     "model_predictions": ModelPrediction,
+                    "model_evaluation_samples": ModelEvaluationSample,
                     "cti_lookup_results": CTILookupResult,
                     "alerts": Alert,
                 }.items():
@@ -110,6 +112,63 @@ class SitePersistenceService:
             "table_count": len(tables),
             "counts": counts,
         }
+
+    def sync_evaluation_samples(self, rows: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...]) -> dict[str, int]:
+        """Idempotently store held-out replay rows without creating live events or alerts."""
+
+        factory = get_session_factory()
+        inserted = 0
+        updated = 0
+        with factory() as session:
+            model_name = str(self.model_metadata.get("model_name") or "ciciomt2024-catboost")
+            model = session.scalar(select(ModelVersion).where(ModelVersion.name == model_name))
+            if model is None:
+                raise RuntimeError("The CatBoost model version was not initialized in the database.")
+
+            sample_keys = [str(row["sample_id"]) for row in rows]
+            existing = {
+                sample.sample_key: sample
+                for sample in session.scalars(
+                    select(ModelEvaluationSample).where(ModelEvaluationSample.sample_key.in_(sample_keys))
+                )
+            }
+            for row in rows:
+                sample_key = str(row["sample_id"])
+                sample = existing.get(sample_key)
+                if sample is None:
+                    sample = ModelEvaluationSample(
+                        model_version_id=model.id,
+                        sample_key=sample_key,
+                        dataset_name=str(row["source_dataset"]),
+                        dataset_split=str(row["source_split"]),
+                        source_file=str(row["source_file"]),
+                        source_row_number=int(row["source_row_number"]),
+                        attack_subclass=str(row["attack_subclass"]),
+                        true_family=str(row["true_family"]),
+                        predicted_family=str(row["predicted_family"]),
+                        confidence=float(row["confidence"]),
+                        correct=bool(row["correct"]),
+                        feature_snapshot=json_safe(row["features"]),
+                        class_probabilities=json_safe(row["probabilities"]),
+                    )
+                    session.add(sample)
+                    inserted += 1
+                else:
+                    sample.model_version_id = model.id
+                    sample.dataset_name = str(row["source_dataset"])
+                    sample.dataset_split = str(row["source_split"])
+                    sample.source_file = str(row["source_file"])
+                    sample.source_row_number = int(row["source_row_number"])
+                    sample.attack_subclass = str(row["attack_subclass"])
+                    sample.true_family = str(row["true_family"])
+                    sample.predicted_family = str(row["predicted_family"])
+                    sample.confidence = float(row["confidence"])
+                    sample.correct = bool(row["correct"])
+                    sample.feature_snapshot = json_safe(row["features"])
+                    sample.class_probabilities = json_safe(row["probabilities"])
+                    updated += 1
+            session.commit()
+        return {"inserted": inserted, "updated": updated, "total": len(rows)}
 
     @staticmethod
     def _get_or_create_asset(session, event: Mapping[str, Any]) -> Asset | None:
