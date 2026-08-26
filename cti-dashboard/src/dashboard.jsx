@@ -212,6 +212,101 @@ const providerStatusLabel = (provider) => {
   return 'Not recorded';
 };
 
+const PROVIDER_VERDICTS = {
+  malicious: { label: 'Malicious', tone: 'danger' },
+  vulnerable: { label: 'Vulnerability confirmed', tone: 'danger' },
+  suspicious: { label: 'Suspicious', tone: 'warning' },
+  match: { label: 'Threat-intelligence match', tone: 'warning' },
+  clean: { label: 'No malicious detections', tone: 'safe' },
+  no_match: { label: 'No OTX pulse match', tone: 'safe' },
+  not_found: { label: 'Not found', tone: 'safe' },
+  error: { label: 'Lookup error', tone: 'muted' },
+};
+
+const providerObservationView = (providerId, observation) => {
+  const metrics = observation.metrics || {};
+  const verdict = PROVIDER_VERDICTS[observation.verdict] || {
+    label: formatReportLabel(observation.verdict || 'unknown'),
+    tone: 'muted',
+  };
+  let summary = observation.result || 'No finding details were returned.';
+  let facts = [];
+
+  if (providerId === 'otx') {
+    const pulses = toFiniteNumber(metrics.pulse_count);
+    summary = pulses
+      ? `This indicator appears in ${pulses} AlienVault community threat pulse${pulses === 1 ? '' : 's'}.`
+      : 'AlienVault OTX did not associate this indicator with a community threat pulse.';
+    facts = [
+      ['OTX pulses', pulses],
+      ['Reputation score', toFiniteNumber(metrics.reputation)],
+      ['Validation records', toFiniteNumber(metrics.validation_count)],
+    ];
+  } else if (providerId === 'virustotal') {
+    const malicious = toFiniteNumber(metrics.malicious);
+    const suspicious = toFiniteNumber(metrics.suspicious);
+    const harmless = toFiniteNumber(metrics.harmless);
+    const total = toFiniteNumber(metrics.total_engines);
+    const detectionRate = total ? `${((malicious / total) * 100).toFixed(1)}%` : '0.0%';
+    summary = malicious
+      ? `${malicious} of ${total} security engines classified this indicator as malicious (${detectionRate}).`
+      : suspicious
+        ? `${suspicious} security engine${suspicious === 1 ? '' : 's'} marked this indicator as suspicious.`
+        : `No malicious engine detections were returned out of ${total} checked engines.`;
+    facts = [
+      ['Malicious', malicious],
+      ['Suspicious', suspicious],
+      ['Harmless', harmless],
+      ['Engines checked', total],
+    ];
+  } else if (providerId === 'osv') {
+    const affected = toFiniteNumber(metrics.affected_packages);
+    summary = metrics.found
+      ? `OSV confirmed the vulnerability and returned ${affected} affected package record${affected === 1 ? '' : 's'}.`
+      : 'OSV did not return a vulnerability record for this identifier.';
+    facts = [
+      ['Advisory', metrics.id || observation.indicator],
+      ['Affected packages', affected],
+    ];
+  } else if (providerId === 'nvd') {
+    const severity = Array.isArray(metrics.severities) && metrics.severities.length
+      ? metrics.severities.join(', ')
+      : 'Not reported';
+    const cvss = toFiniteNumber(metrics.max_cvss).toFixed(1);
+    summary = metrics.found
+      ? `NVD confirmed the CVE with ${severity} severity and a maximum CVSS score of ${cvss}/10.`
+      : 'NVD did not return a matching CVE record.';
+    facts = [
+      ['CVE', (metrics.cve_ids || []).join(', ') || observation.indicator],
+      ['Severity', severity],
+      ['Maximum CVSS', `${cvss}/10`],
+      ['Known exploited', metrics.known_exploited ? 'Yes' : 'No'],
+    ];
+  }
+
+  return { verdict, summary, facts };
+};
+
+const buildProviderResultHtml = (provider) => {
+  const observations = (Array.isArray(provider.observations) ? provider.observations : [])
+    .filter((observation) => observation?.indicator && observation?.metrics);
+  if (!observations.length) return `<p class="provider-fallback">${escapeHtml(provider.result)}</p>`;
+  return observations.map((observation) => {
+    const view = providerObservationView(provider.provider_id, observation);
+    const facts = view.facts
+      .map(([label, value]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(value)}</span>`)
+      .join('');
+    return `<div class="provider-observation">
+      <div class="provider-observation-head">
+        <strong>${escapeHtml(observation.indicator)}</strong>
+        <em class="verdict-pill ${escapeHtml(view.verdict.tone)}">${escapeHtml(view.verdict.label)}</em>
+      </div>
+      <p>${escapeHtml(view.summary)}</p>
+      <div class="provider-facts">${facts}</div>
+    </div>`;
+  }).join('');
+};
+
 const getReportRows = (log) => {
   const preferredOrder = [
     'log_id',
@@ -319,7 +414,7 @@ const buildReportHtml = (log) => {
       (provider) => `<tr>
         <td>${escapeHtml(provider.provider)}</td>
         <td>${escapeHtml(providerStatusLabel(provider))}</td>
-        <td>${escapeHtml(provider.result)}</td>
+        <td>${buildProviderResultHtml(provider)}</td>
       </tr>`,
     )
     .join('');
@@ -374,6 +469,18 @@ const buildReportHtml = (log) => {
       .provider-table th { width: auto; }
       .provider-table td:first-child { width: 20%; font-weight: 700; }
       .provider-table td:nth-child(2) { width: 22%; }
+      .provider-observation + .provider-observation { margin-top: 12px; padding-top: 12px; border-top: 1px solid #d8e1e8; }
+      .provider-observation-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+      .provider-observation-head strong { overflow-wrap: anywhere; }
+      .provider-observation p, .provider-fallback { margin: 7px 0; color: #314555; }
+      .verdict-pill { flex: none; padding: 3px 7px; border-radius: 999px; font-size: 11px; font-style: normal; font-weight: 800; }
+      .verdict-pill.danger { color: #9b1730; background: #fde8ed; }
+      .verdict-pill.warning { color: #7c5100; background: #fff1cf; }
+      .verdict-pill.safe { color: #12634f; background: #dcf7ef; }
+      .verdict-pill.muted { color: #526474; background: #e9eef2; }
+      .provider-facts { display: flex; flex-wrap: wrap; gap: 6px; }
+      .provider-facts span { padding: 5px 7px; border-radius: 4px; background: #f1f5f8; font-size: 11px; }
+      .provider-facts b { margin-right: 4px; }
       .recommendations li { margin-bottom: 14px; }
       .recommendations div { margin-top: 4px; }
       .method-note { padding: 10px 12px; background: #f6f9fb; border-left: 3px solid #167f92; }
@@ -1639,6 +1746,36 @@ function ReportModal({
   );
 }
 
+function ProviderResult({ provider }) {
+  const observations = (Array.isArray(provider.observations) ? provider.observations : [])
+    .filter((observation) => observation?.indicator && observation?.metrics);
+  if (!observations.length) {
+    return <p className="provider-fallback">{provider.result}</p>;
+  }
+
+  return (
+    <div className="provider-observation-list">
+      {observations.map((observation, index) => {
+        const view = providerObservationView(provider.provider_id, observation);
+        return (
+          <article className="provider-observation" key={`${observation.indicator}-${index}`}>
+            <div className="provider-observation-head">
+              <strong>{observation.indicator}</strong>
+              <span className={`verdict-pill ${view.verdict.tone}`}>{view.verdict.label}</span>
+            </div>
+            <p>{view.summary}</p>
+            <div className="provider-facts">
+              {view.facts.map(([label, value]) => (
+                <span key={label}><b>{label}</b>{String(value)}</span>
+              ))}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function ReportDocument({ log, reportRef }) {
   const tlpMeta = TLP_META[log.tlp] || TLP_META['TLP:CLEAR'];
   const status = getLogThreatStatus(log);
@@ -1736,7 +1873,7 @@ function ReportDocument({ log, reportRef }) {
                 <tr key={provider.provider_id}>
                   <td><strong>{provider.provider}</strong></td>
                   <td>{providerStatusLabel(provider)}</td>
-                  <td>{provider.result}</td>
+                  <td><ProviderResult provider={provider} /></td>
                 </tr>
               ))}
             </tbody>

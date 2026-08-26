@@ -1702,6 +1702,84 @@
   width: 22%;
 }
 
+.provider-observation-list {
+  display: grid;
+  gap: 12px;
+}
+
+.provider-observation + .provider-observation {
+  padding-top: 12px;
+  border-top: 1px solid #d7e1e8;
+}
+
+.provider-observation-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.provider-observation-head strong {
+  min-width: 0;
+  color: #17242f;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.provider-observation p,
+.provider-fallback {
+  margin: 7px 0;
+  color: #314555;
+  line-height: 1.45;
+}
+
+.verdict-pill {
+  flex: none;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.verdict-pill.danger {
+  color: #9b1730;
+  background: #fde8ed;
+}
+
+.verdict-pill.warning {
+  color: #7c5100;
+  background: #fff1cf;
+}
+
+.verdict-pill.safe {
+  color: #12634f;
+  background: #dcf7ef;
+}
+
+.verdict-pill.muted {
+  color: #526474;
+  background: #e9eef2;
+}
+
+.provider-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.provider-facts span {
+  padding: 5px 7px;
+  border-radius: 5px;
+  color: #314555;
+  background: #f1f5f8;
+  font-size: 0.7rem;
+}
+
+.provider-facts b {
+  margin-right: 5px;
+}
+
 .report-posture-note,
 .report-method-note {
   padding: 11px 13px;

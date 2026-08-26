@@ -115,6 +115,7 @@ def _observation(provider: str, evidence: Mapping[str, Any], payload: Mapping[st
             "found": bool(records),
             "cve_ids": cve_ids,
             "max_cvss": max_cvss,
+            "severities": severities,
             "known_exploited": known_exploited,
             "required_actions": required_actions,
         },
