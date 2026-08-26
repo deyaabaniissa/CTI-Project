@@ -716,7 +716,12 @@ export default function Dashboard({ onLogout }) {
   );
 
   const modelMetrics = modelInfo.metrics || {};
-  const featureImportance = (modelInfo.feature_importance || []).slice(0, 8);
+  const importanceByFeature = new Map(
+    (modelInfo.feature_importance || []).map((item) => [item.feature, item]),
+  );
+  const featureImportance = (modelInfo.features || []).map((feature) => (
+    importanceByFeature.get(feature) || { feature, importance: 0 }
+  )).sort((left, right) => right.importance - left.importance);
   const maxFeatureImportance = featureImportance[0]?.importance || 1;
   const balanceData = modelInfo.training_dataset?.balance_audit || [];
   const maxBalanceRows = Math.max(
@@ -1086,7 +1091,10 @@ export default function Dashboard({ onLogout }) {
               </div>
             </div>
             <div className="feature-panel">
-              <div className="panel-heading"><strong>Top feature importance</strong><span>Model explainability</span></div>
+              <div className="panel-heading">
+                <strong>All {featureImportance.length || 12} model features</strong>
+                <span>Complete feature importance</span>
+              </div>
               {featureImportance.map((item) => (
                 <div className="feature-row" key={item.feature}>
                   <div><span>{item.feature}</span><em>{Number(item.importance).toFixed(1)}%</em></div>
