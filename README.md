@@ -66,7 +66,15 @@ Retraining is fully reproducible: `python training/train_catboost_model.py`.
 
 ### Website evaluation replay
 
-`data/evaluation/official_test_50_samples_per_family_results.csv` / `_full_results.json` hold a saved 300-row replay (50 per family) generated against a **previous** model. They have not been regenerated for the model above and are stale pending a decision on how to refresh them (the four-source CTI enrichment they also carry needs live provider credentials to reproduce).
+`data/evaluation/official_test_50_samples_per_family_results.csv` / `_full_results.json` hold a saved 300-row replay (50 per family). Predictions, risk scores, and recommendations are regenerated against the current model whenever it's retrained (`training/train_catboost_model.py`'s risk-scoring formula matches `flask_app.py`'s `analyze()` exactly: `100 * (0.45*model_attack_score + 0.40*cti_score + 0.15*asset_criticality)`); the saved four-source CTI evidence (OTX/VirusTotal/OSV/NVD) is reused as-is since it doesn't depend on which model classified the traffic — an analyst can still force a live re-query per row from the dashboard.
+
+| Metric | Score |
+| --- | ---: |
+| Rows | 300 |
+| Correct predictions | 277 |
+| Replay accuracy | 92.33% |
+
+Per-family (50 samples each): Benign 50/50, DDoS 50/50, MQTT 45/50, Recon 46/50, Spoofing 48/50, **DoS 38/50** — the balanced-sample view makes the DoS/DDoS confusion documented above look sharper than its true population-level rate (81.6% recall on the full 416K-row DoS test set) since variance is higher at n=50.
 
 The replay powers the website's searchable TEST table and per-row PDF reports. It also enters the visible traffic log and live EDA in batches of 10 samples every 5 seconds without creating duplicate incident rows. It does not replace the full-scale scientific evaluation above. Each report uses the exact saved prediction, confidence, risk score, recommendations, 12 feature values, six class probabilities, and OTX, VirusTotal, OSV, and NVD results.
 
