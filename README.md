@@ -66,19 +66,19 @@ Retraining is fully reproducible: `python training/train_catboost_model.py`.
 
 ### Website evaluation replay
 
-`data/evaluation/official_test_50_samples_per_family_results.csv` / `_full_results.json` hold a saved 300-row replay (50 per family). Predictions, risk scores, and recommendations are regenerated against the current model whenever it's retrained, using the same risk formula as `flask_app.py`'s `analyze()`: `100 * (0.60*model_attack_score + 0.25*cti_score + 0.15*asset_criticality)`. The saved four-source CTI evidence (OTX/VirusTotal/OSV/NVD) is reused as-is since it doesn't depend on which model classified the traffic — an analyst can still force a live re-query per row from the dashboard.
+`data/evaluation/official_test_50_samples_per_family_results.csv` / `_full_results.json` hold a saved 300-row replay (50 per family). The website uses only the 12 numeric flow features and saved CatBoost predictions from those rows. CICIoMT2024 does not provide an attributable IP/domain/hash, CVE, or package for each exported flow, so its evaluation reports do not query CTI providers. OTX and VirusTotal are queried for real IoCs, while OSV and NVD are queried for real CVE/vulnerability references submitted through a live event or the clearly labeled integration fixture. This prevents one demonstration indicator from being misrepresented as evidence for every evaluation row.
 
-**Risk-weight note.** Originally 0.45/0.40/0.15. Lowered CTI's weight to 0.25 (model raised to 0.60) after finding that a single public indicator attached to an event — unrelated to whether that specific traffic is malicious — could push a maximally-confident, correctly-classified Benign prediction to a "medium" risk score purely from the CTI term. Confirmed on this replay: a 100%-confidence Benign row dropped from risk 54 ("medium") to 39 ("low") after the change. Model output now dominates the score, with CTI acting as a tie-breaker rather than a co-equal factor.
+**Risk separation.** Evaluation-row risk is derived from the model prediction only. Live-event risk uses the documented model/CTI/asset fusion after the event's own indicators are enriched. This prevents unrelated demonstration evidence from changing an Official TEST prediction.
 
 | Metric | Score |
 | --- | ---: |
 | Rows | 300 |
-| Correct predictions | 277 |
-| Replay accuracy | 92.33% |
+| Correct predictions | 278 |
+| Replay accuracy | 92.67% |
 
-Per-family (50 samples each): Benign 50/50, DDoS 50/50, MQTT 45/50, Recon 46/50, Spoofing 48/50, **DoS 38/50** — the balanced-sample view makes the DoS/DDoS confusion documented above look sharper than its true population-level rate (81.6% recall on the full 416K-row DoS test set) since variance is higher at n=50.
+Per-family (50 samples each): Benign 41/50, DDoS 50/50, DoS 50/50, MQTT 49/50, Recon 47/50, and Spoofing 41/50. This balanced replay is a compact, reproducible demonstration sample; the untouched full official test split remains the primary model evaluation.
 
-The replay powers the website's searchable TEST table and per-row PDF reports. It also enters the visible traffic log and live EDA in batches of 10 samples every 5 seconds without creating duplicate incident rows. It does not replace the full-scale scientific evaluation above. Each report uses the exact saved prediction, confidence, risk score, recommendations, 12 feature values, six class probabilities, and OTX, VirusTotal, OSV, and NVD results.
+The replay powers the website's searchable TEST table and per-row PDF reports. It also enters the visible traffic log without creating duplicate incident rows. It does not replace the full-scale scientific evaluation above. Each report uses the exact saved prediction, confidence, 12 feature values, and six class probabilities. CTI rows are explicitly marked not applicable because the exported evaluation rows contain no attributable indicators.
 
 ## Investigation workflow
 

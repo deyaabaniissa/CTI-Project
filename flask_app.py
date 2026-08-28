@@ -87,6 +87,22 @@ def flatten_event(payload: Mapping[str, Any]) -> dict[str, Any]:
     return event
 
 
+VALID_TLP = {"TLP:RED", "TLP:AMBER", "TLP:GREEN", "TLP:CLEAR"}
+
+
+def normalize_tlp(value: Any, *, default: str) -> str:
+    normalized = str(value or default).strip().upper()
+    return normalized if normalized in VALID_TLP else default
+
+
+def attack_probability(prediction: Mapping[str, Any]) -> float:
+    """Return P(any attack), distinct from confidence in the winning class."""
+
+    probabilities = prediction.get("probabilities") or {}
+    benign_probability = float(probabilities.get("Benign", 0.0) or 0.0)
+    return min(max(1.0 - benign_probability, 0.0), 1.0)
+
+
 @lru_cache(maxsize=1)
 def load_official_test_replay() -> tuple[dict[str, Any], ...]:
     if not OFFICIAL_TEST_REPLAY_PATH.is_file():
@@ -115,6 +131,26 @@ def load_official_test_replay() -> tuple[dict[str, Any], ...]:
             family: float((prediction.get("probabilities") or {}).get(family, 0.0))
             for family in model_service.classes
         }
+        # The official CICIoMT2024 TEST rows contain flow features only.  The
+        # generated evaluation artifact also carries one public Log4Shell
+        # fixture so the four CTI clients can be integration-tested.  That
+        # fixture is identical on all 300 rows and is not evidence about an
+        # individual flow.  Never expose or query it from per-row reports.
+        evaluation_event = {
+            **features,
+            "ground_truth_family": true_family,
+            "sample_number_in_family": sample_number,
+            "sample_position": int(event["sample_position"]),
+            "sample_origin": str(event.get("sample_origin") or "CICIoMT2024 Official TEST"),
+        }
+        model_attack_score = attack_probability(prediction)
+        risk_score = round(100.0 * model_attack_score, 2)
+        risk_level = (
+            "critical" if risk_score >= 80
+            else "high" if risk_score >= 60
+            else "medium" if risk_score >= 40
+            else "low"
+        )
         rows.append({
             "sample_id": f"CIC24-TEST-{true_family.upper()}-{sample_number:03d}",
             "source_dataset": "CICIoMT2024",
@@ -128,75 +164,70 @@ def load_official_test_replay() -> tuple[dict[str, Any], ...]:
             "correct": predicted_family == true_family,
             "probabilities": probabilities,
             "features": features,
-            "event": dict(event),
-            "cti_summary": list(result.get("cti_summary") or []),
-            "observables": dict(result.get("observables") or {}),
-            "risk_score": float(result.get("risk_score") or 0.0),
-            "risk_level": str(result.get("risk_level") or "low"),
-            "recommended_action_texts": [str(value) for value in result.get("recommended_actions") or []],
+            "event": evaluation_event,
+            "cti_summary": [],
+            "observables": {},
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "recommended_action_texts": [],
             "source_investigation_id": str(result.get("investigation_id") or ""),
             "source_created_at": str(result.get("created_at") or ""),
         })
+    correct = sum(int(bool(row["correct"])) for row in rows)
+    evaluation_metadata = model_service.metadata.setdefault("evaluation", {})
+    evaluation_metadata.update({
+        "website_replay_rows": len(rows),
+        "website_replay_rows_per_family": 50,
+        "website_replay_accuracy": correct / len(rows),
+    })
     return tuple(rows)
 
 
 def evaluation_recommendations(row: Mapping[str, Any]) -> list[dict[str, Any]]:
     risk_level = str(row.get("risk_level") or "low")
     priority = "Critical" if risk_level == "critical" else "High" if risk_level == "high" else "Review"
-    sources = sorted({str(item.get("source")) for item in row.get("cti_summary", []) if item.get("source")})
-    return [
-        {
+    family = str(row.get("predicted_family") or "Benign")
+    family_actions = {
+        "DDoS": "Enable upstream DDoS filtering, rate limiting, and temporary source blocking.",
+        "DoS": "Apply rate limiting, isolate the source, and validate service capacity and availability.",
+        "MQTT": "Restrict MQTT broker access, rotate credentials, and enforce TLS and topic ACLs.",
+        "Recon": "Review adjacent firewall logs for targeted ports and assets, then block confirmed scanners.",
+        "Spoofing": "Inspect ARP tables, enable Dynamic ARP Inspection, and isolate the suspected switch segment.",
+    }
+    actions = []
+    if family in family_actions:
+        actions.append({
             "priority": priority,
-            "action": action,
-            "problem": f"Four-source integration result for a {row['predicted_family']} prediction.",
-            "evidence_sources": sources,
-            "evidence": "Recommendation returned by the saved four-source investigation.",
+            "action": family_actions[family],
+            "problem": f"CatBoost classified the held-out network flow as {family}.",
+            "evidence_sources": ["CICIoMT2024 CatBoost"],
+            "evidence": "Model-only evaluation; this row does not contain an IoC, CVE, or package identifier.",
+        })
+    actions.append(
+        {
+            "priority": "Review",
+            "action": "Preserve the original feature row and prediction for analyst review.",
+            "problem": "Maintain evaluation evidence and traceability.",
+            "evidence_sources": ["CICIoMT2024 Official TEST"],
+            "evidence": "No threat-intelligence indicator is present in this flow row.",
         }
-        for action in row.get("recommended_action_texts", [])
-    ]
+    )
+    return actions
 
 
 def evaluation_provider_evidence(row: Mapping[str, Any]) -> list[dict[str, Any]]:
-    provider_metadata = {
-        "OTX": ("otx", "AlienVault OTX"),
-        "VirusTotal": ("virustotal", "VirusTotal"),
-        "OSV": ("osv", "OSV"),
-        "NVD": ("nvd", "NIST NVD"),
-    }
-    grouped: dict[str, list[dict[str, Any]]] = {name: [] for name in provider_metadata}
-    for raw in row.get("cti_summary", []):
-        source = str(raw.get("source") or "")
-        if source in grouped:
-            grouped[source].append(dict(raw))
-
-    evidence: list[dict[str, Any]] = []
-    for source, (provider_id, provider_name) in provider_metadata.items():
-        observations = grouped[source]
-        available = bool(observations) and all(bool(item.get("ok")) for item in observations)
-        modes = sorted({str(item.get("lookup_mode") or "unknown") for item in observations})
-        query_values = [str(item.get("query_value") or "") for item in observations]
-        evidence.append({
-            "provider_id": provider_id,
-            "provider": provider_name,
-            "configured": True,
-            "applicable": True,
-            "queried": bool(observations),
-            "available": available,
-            "status": "available" if available else "unavailable",
-            "lookup_mode": "saved_cache",
-            "result": (
-                f"Saved cache result (not a current API call): {len(observations)} lookup(s) "
-                f"via {', '.join(modes)}: "
-                + "; ".join(query_values)
-                if observations
-                else "No saved result for this provider."
-            ),
-            "observations": observations,
-        })
+    source_states = intelligence.status()["sources"]
+    evidence = summarize_provider_evidence([], source_states)
+    for provider in evidence:
+        state = source_states.get(provider["provider_id"]) or {}
+        provider["connection_status"] = str(state.get("status") or "unknown")
+        provider["connection_verified_at"] = state.get("last_success")
+        provider["connection_error"] = state.get("last_error")
+        provider["result"] = (
+            "Not queried: CICIoMT2024 flow rows contain numeric model features "
+            "but no IP/domain/hash, CVE, or package identifier attributable to this row."
+        )
     return evidence
-
-
-evaluation_live_evidence_cache: dict[str, dict[str, Any]] = {}
 
 
 def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -207,19 +238,12 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
     risk_score = float(row.get("risk_score") or 0.0)
     risk_level = str(row.get("risk_level") or "low")
     is_in_otx = any(str(item.get("source")) == "OTX" and float(item.get("score") or 0.0) > 0 for item in cti_summary)
-    tlp = "TLP:RED" if risk_level in {"critical", "high"} else "TLP:AMBER" if risk_level == "medium" else "TLP:GREEN"
-    cached_live = evaluation_live_evidence_cache.get(str(row["sample_id"]))
-    provider_evidence = (
-        list(cached_live["provider_evidence"])
-        if cached_live
-        else evaluation_provider_evidence(row)
-    )
-    indicator_evidence = (
-        list(cached_live["indicator_evidence"])
-        if cached_live
-        else list(cti_summary)
-    )
-    evidence_mode = "live_api" if cached_live else "saved_cache"
+    # CICIoMT2024 is public evaluation data.  TLP describes sharing policy,
+    # not model risk, so it must not be derived from severity.
+    tlp = "TLP:CLEAR"
+    provider_evidence = evaluation_provider_evidence(row)
+    indicator_evidence: list[dict[str, Any]] = []
+    evidence_mode = "not_applicable"
     return {
         "log_id": row["sample_id"],
         "investigation_id": row["sample_id"],
@@ -231,8 +255,8 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "prediction_correct": bool(row["correct"]),
         "attack_subclass": row["attack_subclass"],
         "department": "CICIoMT2024 model evaluation",
-        "source_ip": str(event.get("src_ip") or "Not supplied"),
-        "destination_target": str(event.get("asset_id") or event.get("product") or row["source_file"]),
+        "source_ip": "Not supplied by CICIoMT2024 flow export",
+        "destination_target": row["source_file"],
         "source_dataset": row["source_dataset"],
         "source_split": row["source_split"],
         "source_row_number": row["source_row_number"],
@@ -241,32 +265,34 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "is_threat": int(predicted_family != "Benign"),
         "is_in_otx": is_in_otx,
         "risk_level": risk_level,
+        "severity": risk_level,
         "risk_probability": round(risk_score / 100.0, 6),
+        "attack_probability": round(risk_score / 100.0, 6),
         "risk_score": round(risk_score, 2),
         "model_probability": round(confidence, 6),
-        "intel_verdict": (
-            "live four-source API evidence returned"
-            if cached_live and cached_live.get("all_four_available")
-            else "live API check completed with partial availability"
-            if cached_live
-            else "saved four-source evidence; live refresh available"
-        ),
+        "predicted_class_confidence": round(confidence, 6),
+        "intel_verdict": "CTI not applicable — no per-row indicator supplied",
         "tlp": tlp,
+        "sharing_classification": tlp,
         "evaluation_mode": True,
+        "original_event_time": "Not available in the CICIoMT2024 flow export",
+        "replay_time": None,
         "features": row["features"],
         "class_probabilities": row["probabilities"],
         "provider_evidence": provider_evidence,
         "indicator_evidence": indicator_evidence,
         "evidence_mode": evidence_mode,
-        "live_evidence_checked_at": cached_live.get("checked_at") if cached_live else None,
-        "live_evidence_endpoint": f"/api/evaluation-samples/{row['sample_id']}/live-evidence",
+        "live_evidence_checked_at": None,
+        "live_evidence_endpoint": None,
         "recommended_actions": evaluation_recommendations(row),
-        "recommendation_method": "Saved recommendations from the CatBoost plus four-source integration run.",
+        "recommendation_method": "Model-only guidance for a held-out network-flow evaluation row.",
         "risk_reasons": [
             f"Ground truth: {row['true_family']}.",
             f"CatBoost prediction: {predicted_family} ({confidence:.1%}).",
             "Correct prediction." if row["correct"] else "Incorrect prediction retained for transparent evaluation.",
-            f"Four-source risk score: {risk_score:.2f}/100 ({risk_level}).",
+            f"Attack probability P(non-Benign): {risk_score:.2f}% ({risk_level} severity).",
+            f"Predicted-class confidence: {confidence:.2%}.",
+            "CTI was not queried because the dataset row has no attributable IoC, CVE, or package.",
             "This unique row belongs only to the held-out CICIoMT2024 Official TEST split.",
         ],
         "model_details": {
@@ -384,11 +410,7 @@ def analyze(payload: Mapping[str, Any]) -> dict[str, Any]:
     evidence = runner.run(enrich_event(event))
     provider_rows = summarize_provider_evidence(evidence, intelligence.status()["sources"])
 
-    model_attack_score = (
-        prediction["confidence"]
-        if prediction["predicted_family"] != "Benign"
-        else 1.0 - prediction["confidence"]
-    )
+    model_attack_score = attack_probability(prediction)
     cti_score = max(
         (
             float(item.get("confidence", 0.0) or 0.0)
@@ -410,6 +432,8 @@ def analyze(payload: Mapping[str, Any]) -> dict[str, Any]:
         "provider_evidence": provider_rows,
         "risk_score": risk_score,
         "risk_level": risk_level,
+        "attack_probability": round(model_attack_score, 6),
+        "predicted_class_confidence": round(float(prediction["confidence"]), 6),
         "is_threat": int(prediction["predicted_family"] != "Benign" or cti_score > 0.2),
         "recommended_actions": action_rows,
         "source_coverage": {
@@ -431,6 +455,26 @@ def dashboard_log(event: Mapping[str, Any], result: Mapping[str, Any]) -> dict[s
     prediction = result["prediction"]
     source_ip = str(event.get("source_ip") or event.get("src_ip") or "0.0.0.0")
     destination = str(event.get("destination_ip") or event.get("dst_ip") or event.get("product") or "hospital asset")
+    provider_rows = list(result.get("provider_evidence") or [])
+    otx_match = any(
+        row.get("provider_id") == "otx"
+        and any(observation.get("verdict") == "match" for observation in row.get("observations") or [])
+        for row in provider_rows
+    )
+    cti_verdicts = {
+        str(item.get("verdict") or "unknown")
+        for item in result.get("indicator_evidence") or []
+    }
+    if cti_verdicts & {"malicious", "vulnerable"}:
+        intel_verdict = "CTI threat evidence confirmed"
+    elif cti_verdicts:
+        intel_verdict = "CTI checked — no confirmed threat evidence"
+    else:
+        intel_verdict = "CTI not applicable — no compatible indicator"
+    sharing_classification = normalize_tlp(
+        event.get("sharing_classification") or event.get("tlp"),
+        default="TLP:AMBER",
+    )
     log = {
         "log_id": f"AI-{now.strftime('%H%M%S')}-{random.randint(100, 999)}",
         "date": now.strftime("%Y-%m-%d"),
@@ -443,13 +487,17 @@ def dashboard_log(event: Mapping[str, Any], result: Mapping[str, Any]) -> dict[s
         "data_mb": 0.0,
         "data_unit": "KB",
         "is_threat": result["is_threat"],
-        "is_in_otx": bool(result["source_coverage"].get("otx", {}).get("available")),
+        "is_in_otx": otx_match,
         "risk_level": result["risk_level"],
+        "severity": result["risk_level"],
         "risk_probability": result["risk_score"] / 100.0,
+        "attack_probability": result["attack_probability"],
         "model_probability": prediction["confidence"],
-        "intel_verdict": "malicious" if result["is_threat"] else "unknown",
-        "tlp": "TLP:RED" if result["risk_level"] == "critical" else "TLP:AMBER" if result["risk_level"] == "high" else "TLP:GREEN",
-        "provider_evidence": result["provider_evidence"],
+        "predicted_class_confidence": prediction["confidence"],
+        "intel_verdict": intel_verdict,
+        "tlp": sharing_classification,
+        "sharing_classification": sharing_classification,
+        "provider_evidence": provider_rows,
         "indicator_evidence": result["indicator_evidence"],
         "recommended_actions": result["recommended_actions"],
         "risk_reasons": [
@@ -458,6 +506,8 @@ def dashboard_log(event: Mapping[str, Any], result: Mapping[str, Any]) -> dict[s
         ],
         "model_details": prediction,
         "investigation_id": result["investigation_id"],
+        "evaluation_mode": False,
+        "observed_time": str(event.get("observed_time") or event.get("timestamp") or now.isoformat()),
     }
     recent_alerts.appendleft(log)
     return log
@@ -586,43 +636,73 @@ def evaluation_sample_live_evidence(sample_id: str) -> Any:
     if row is None:
         return jsonify({"error": "Evaluation sample was not found."}), 404
 
-    payload = request.get_json(silent=True) or {}
-    force_refresh = bool(payload.get("force_refresh", True))
-    if not force_refresh and sample_id in evaluation_live_evidence_cache:
-        return jsonify(evaluation_live_evidence_cache[sample_id])
-
-    evidence = runner.run(
-        enrich_event(row.get("event") or {}, force_refresh=force_refresh),
-        timeout=120,
-    )
-    provider_rows = summarize_provider_evidence(
-        evidence, intelligence.status()["sources"]
-    )
-    checked_at = datetime.now(timezone.utc).isoformat()
-    for provider in provider_rows:
-        provider["lookup_mode"] = "live_api"
-        provider["live_checked_at"] = checked_at
-        if provider.get("available"):
-            provider["result"] = f"Live API response: {provider.get('result') or 'Available.'}"
-        elif provider.get("queried"):
-            provider["result"] = f"Live API request failed: {provider.get('result') or 'Unavailable.'}"
-
-    result = {
+    return jsonify({
+        "error": (
+            "This evaluation row has no attributable IoC, CVE, or package. "
+            "The four APIs were not queried. Use the integration test or submit "
+            "a live event containing real indicators."
+        ),
         "sample_id": sample_id,
-        "provider_evidence": provider_rows,
-        "indicator_evidence": evidence,
-        "checked_at": checked_at,
-        "lookup_mode": "live_api",
-        "all_four_available": all(bool(item.get("available")) for item in provider_rows),
-        "source_status": intelligence.status()["sources"],
-    }
-    evaluation_live_evidence_cache[sample_id] = result
-    return jsonify(result)
+        "provider_evidence": evaluation_provider_evidence(row),
+    }), 422
 
 
 @app.get("/api/intelligence/status")
 def intelligence_status() -> Any:
     return jsonify(intelligence.status())
+
+
+connectivity_check_cache: dict[str, Any] = {}
+connectivity_check_lock = threading.Lock()
+
+
+@app.post("/api/intelligence/connectivity-check")
+def intelligence_connectivity_check() -> Any:
+    """Verify provider reachability without attaching probe findings to a log.
+
+    OTX and VirusTotal require an IoC-shaped request, while OSV and NVD require
+    a vulnerability reference.  The two public probes below are used only to
+    verify HTTPS/authentication and their findings are deliberately discarded.
+    The result is cached to protect provider quotas when several reports open.
+    """
+
+    payload = request.get_json(silent=True) or {}
+    force_refresh = bool(payload.get("force_refresh", False))
+    now = time.monotonic()
+    with connectivity_check_lock:
+        cached_at = float(connectivity_check_cache.get("cached_at") or 0.0)
+        if not force_refresh and now - cached_at < 600 and connectivity_check_cache.get("result"):
+            return jsonify(connectivity_check_cache["result"])
+
+        async def check_sources() -> None:
+            await asyncio.gather(
+                intelligence.enrich_indicator("8.8.8.8", force_refresh=force_refresh),
+                intelligence.enrich_indicator("CVE-2021-44228", force_refresh=force_refresh),
+            )
+
+        runner.run(check_sources(), timeout=120)
+        checked_at = datetime.now(timezone.utc).isoformat()
+        states = intelligence.status()["sources"]
+        sources = {
+            provider: {
+                "name": state.get("name"),
+                "configured": bool(state.get("configured")),
+                "status": state.get("status"),
+                "connected": state.get("status") == "live",
+                "last_success": state.get("last_success"),
+                "last_error": state.get("last_error"),
+                "latency_ms": state.get("latency_ms"),
+            }
+            for provider, state in states.items()
+        }
+        result = {
+            "checked_at": checked_at,
+            "all_four_connected": all(item["connected"] for item in sources.values()),
+            "sources": sources,
+            "probe_results_attached_to_logs": False,
+        }
+        connectivity_check_cache.update({"cached_at": now, "result": result})
+        return jsonify(result)
 
 
 @app.post("/api/intelligence/lookup")

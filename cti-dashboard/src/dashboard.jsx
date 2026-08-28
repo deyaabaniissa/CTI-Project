@@ -38,7 +38,9 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 const WS_URL =
   import.meta.env.VITE_WS_URL ||
   `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/live-logs`;
-const LOG_STORAGE_KEY = 'healthcare_soc_logs_v8';
+// Bump when the report schema changes so stale per-row Log4Shell evidence is
+// not restored from a browser that visited an older build.
+const LOG_STORAGE_KEY = 'healthcare_soc_logs_v10';
 const MAX_LOGS = 400;
 const EVALUATION_PAGE_SIZE = 25;
 const REPLAY_BATCH_SIZE = 1;
@@ -60,6 +62,11 @@ const DEDICATED_REPORT_FIELDS = new Set([
   'features',
   'class_probabilities',
   'model_details',
+  'risk_probability',
+  'model_probability',
+  'tlp',
+  'date',
+  'timestamp',
 ]);
 
 const CATEGORY_META = {
@@ -106,24 +113,32 @@ const toFiniteNumber = (value, fallback = 0) => {
   return Number.isFinite(number) ? number : fallback;
 };
 
-const normalizeLog = (log) => ({
-  ...log,
-  log_id: String(log.log_id || `LOG-${Date.now()}`),
-  category: 'IoMT network flows',
-  department: String(log.department || 'General'),
-  destination_target: String(log.destination_target || '0.0.0.0'),
-  source_ip: String(log.source_ip || '0.0.0.0'),
-  data_mb: toFiniteNumber(log.data_mb),
-  is_threat: toFiniteNumber(log.is_threat),
-  is_in_otx: Boolean(log.is_in_otx),
-  risk_level: String(log.risk_level || 'low'),
-  risk_probability: toFiniteNumber(log.risk_probability),
-  model_probability: toFiniteNumber(log.model_probability),
-  intel_verdict: String(log.intel_verdict || 'unknown'),
-  tlp: String(log.tlp || 'TLP:CLEAR'),
-  timestamp: String(log.timestamp || new Date().toLocaleTimeString('en-GB')),
-  date: String(log.date || new Date().toISOString().slice(0, 10)),
-});
+const normalizeLog = (log) => {
+  const severity = String(log.severity || log.risk_level || 'low').toLowerCase();
+  const sharingClassification = String(log.sharing_classification || log.tlp || 'TLP:CLEAR');
+  return {
+    ...log,
+    log_id: String(log.log_id || `LOG-${Date.now()}`),
+    category: 'IoMT network flows',
+    department: String(log.department || 'General'),
+    destination_target: String(log.destination_target || '0.0.0.0'),
+    source_ip: String(log.source_ip || '0.0.0.0'),
+    data_mb: toFiniteNumber(log.data_mb),
+    is_threat: toFiniteNumber(log.is_threat),
+    is_in_otx: Boolean(log.is_in_otx),
+    risk_level: severity,
+    severity,
+    risk_probability: toFiniteNumber(log.attack_probability ?? log.risk_probability),
+    attack_probability: toFiniteNumber(log.attack_probability ?? log.risk_probability),
+    model_probability: toFiniteNumber(log.predicted_class_confidence ?? log.model_probability),
+    predicted_class_confidence: toFiniteNumber(log.predicted_class_confidence ?? log.model_probability),
+    intel_verdict: String(log.intel_verdict || 'unknown'),
+    tlp: sharingClassification,
+    sharing_classification: sharingClassification,
+    timestamp: String(log.timestamp || new Date().toLocaleTimeString('en-GB')),
+    date: String(log.date || new Date().toISOString().slice(0, 10)),
+  };
+};
 
 const mergeLogWindow = (primary, secondary = []) => {
   const seen = new Set();
@@ -176,14 +191,35 @@ const exportCsv = (logs) => {
 };
 
 const formatReportLabel = (key) =>
-  key
+  ({
+    attack_probability: 'Attack Probability P(non-Benign)',
+    predicted_class_confidence: 'Predicted-Class Confidence',
+    sharing_classification: 'Sharing Classification',
+    original_event_time: 'Original Event Time',
+    replay_time: 'Replay Time',
+  }[key] || key
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
     .replace(/\bIp\b/g, 'IP')
     .replace(/\bOtx\b/g, 'OTX')
-    .replace(/\bTlp\b/g, 'TLP');
+    .replace(/\bTlp\b/g, 'TLP'));
 
-const getLogThreatStatus = (log) => (log.is_threat === 1 || log.tlp === 'TLP:RED' || log.is_in_otx ? 'Threat' : 'Safe');
+const getLogThreatStatus = (log) => {
+  const predictedThreat = String(log.traffic_class || '') !== 'Benign';
+  if (log.evaluation_mode) {
+    const correctness = log.prediction_correct ? 'Correct' : 'Incorrect';
+    return `Predicted ${predictedThreat ? 'Threat' : 'Safe'} — ${correctness}`;
+  }
+  return log.is_threat === 1 ? 'Threat' : 'Safe';
+};
+
+const getReportTimeLabel = (log) => (log.evaluation_mode ? 'Replay Time' : 'Observed Time');
+
+const getReportTimeValue = (log) => (
+  log.evaluation_mode
+    ? String(log.replay_time || `${log.date} ${log.timestamp}`)
+    : String(log.observed_time || `${log.date} ${log.timestamp}`)
+);
 
 const getProviderRows = (log) => {
   const supplied = new Map(
@@ -205,12 +241,47 @@ const providerStatusLabel = (provider) => {
   if (provider.status === 'available' && provider.lookup_mode === 'live_api') return 'Live API — connected';
   if (provider.status === 'available' && provider.lookup_mode === 'saved_cache') return 'Cached result — not live';
   if (provider.status === 'available') return 'Queried — available';
-  if (provider.status === 'not_applicable') return 'Not applicable';
+  if (provider.status === 'not_applicable' && provider.connection_status === 'live') {
+    return 'Live API connected — no log indicator';
+  }
+  if (provider.status === 'not_applicable' && provider.connection_status === 'error') {
+    return 'API connection error — no log indicator';
+  }
+  if (provider.status === 'not_applicable' && provider.connection_status === 'ready') {
+    return 'API configured — no log indicator';
+  }
+  if (provider.status === 'not_applicable') return 'Not applicable to this log';
   if (provider.status === 'not_configured') return 'Applicable — not configured';
   if (provider.status === 'not_queried') return 'Applicable — not queried';
-  if (provider.status === 'unavailable') return 'Queried — unavailable';
+  if (provider.status === 'unavailable') {
+    const failed = (provider.observations || []).find((observation) => observation.verdict === 'error');
+    const httpStatus = failed?.metrics?.http_status;
+    const errorType = String(failed?.metrics?.error_type || '').replace(/_/g, ' ');
+    if (httpStatus) return `Lookup failed — HTTP ${httpStatus}`;
+    return errorType ? `Lookup failed — ${errorType}` : 'Lookup failed — see details';
+  }
   return 'Not recorded';
 };
+
+const SEVERITY_META = {
+  critical: { label: 'Critical severity', color: '#e85d75', tone: 'critical' },
+  high: { label: 'High severity', color: '#f28c6f', tone: 'high' },
+  medium: { label: 'Medium severity', color: '#e6a23c', tone: 'medium' },
+  low: { label: 'Low severity', color: '#3ab795', tone: 'low' },
+};
+
+const attachProviderConnections = (log, sourceStates = {}, checkedAt = null) => ({
+  ...log,
+  provider_evidence: getProviderRows(log).map((provider) => {
+    const state = sourceStates[provider.provider_id] || {};
+    return {
+      ...provider,
+      connection_status: state.status || provider.connection_status || 'unknown',
+      connection_verified_at: state.last_success || checkedAt || provider.connection_verified_at || null,
+      connection_error: state.last_error || null,
+    };
+  }),
+});
 
 const PROVIDER_VERDICTS = {
   malicious: { label: 'Malicious', tone: 'danger' },
@@ -231,6 +302,17 @@ const providerObservationView = (providerId, observation) => {
   };
   let summary = observation.result || 'No finding details were returned.';
   let facts = [];
+
+  if (observation.verdict === 'error') {
+    return {
+      verdict,
+      summary,
+      facts: [
+        ['Error type', String(metrics.error_type || 'provider error').replace(/_/g, ' ')],
+        ['HTTP status', metrics.http_status || 'Not available'],
+      ],
+    };
+  }
 
   if (providerId === 'otx') {
     const pulses = toFiniteNumber(metrics.pulse_count);
@@ -310,8 +392,6 @@ const buildProviderResultHtml = (provider) => {
 const getReportRows = (log) => {
   const preferredOrder = [
     'log_id',
-    'date',
-    'timestamp',
     'category',
     'traffic_class',
     'department',
@@ -321,11 +401,12 @@ const getReportRows = (log) => {
     'data_unit',
     'is_threat',
     'is_in_otx',
-    'risk_level',
-    'risk_probability',
-    'model_probability',
+    'severity',
+    'attack_probability',
+    'predicted_class_confidence',
     'intel_verdict',
-    'tlp',
+    'sharing_classification',
+    'original_event_time',
   ];
   const seen = new Set();
   const rows = [];
@@ -358,19 +439,19 @@ const getReportRecommendations = (log) => {
   }
 
   let fallback;
-  if (log.tlp === 'TLP:RED' || log.is_in_otx) {
+  if (log.severity === 'critical' || log.severity === 'high') {
     fallback = [
       'Escalate to the incident response owner immediately.',
       'Validate source and destination assets before allowing continued communication.',
       'Preserve related telemetry and attach this report to the incident record.',
     ];
-  } else if (log.tlp === 'TLP:AMBER' || log.is_threat === 1) {
+  } else if (log.severity === 'medium' || log.is_threat === 1) {
     fallback = [
       'Review the event with the responsible department.',
       'Correlate with endpoint and firewall telemetry for the same time window.',
       'Keep sharing limited to the response team until the event is confirmed.',
     ];
-  } else if (log.tlp === 'TLP:GREEN') {
+  } else if (log.severity === 'low') {
     fallback = [
       'Monitor for repeated high-volume activity from the same assets.',
       'Share within trusted operational teams if needed for awareness.',
@@ -402,6 +483,7 @@ const downloadTextFile = (filename, content, type = 'text/html;charset=utf-8') =
 
 const buildReportHtml = (log) => {
   const tlpMeta = TLP_META[log.tlp] || TLP_META['TLP:CLEAR'];
+  const severityMeta = SEVERITY_META[log.severity] || SEVERITY_META.low;
   const status = getLogThreatStatus(log);
   const rows = getReportRows(log)
     .map(
@@ -456,8 +538,9 @@ const buildReportHtml = (log) => {
       h1 { font-size: 25px; }
       h2 { margin-top: 26px; font-size: 18px; }
       p { margin: 8px 0 0; color: #637485; }
-      .badge { align-self: flex-start; border-radius: 6px; padding: 8px 12px; color: #fff; background: ${tlpMeta.color}; font-weight: 800; }
-      .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 22px; }
+      .badges { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+      .badge { border-radius: 6px; padding: 8px 12px; color: #fff; font-weight: 800; }
+      .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; margin-top: 22px; }
       .summary div { padding: 12px; background: #f6f9fb; border: 1px solid #d8e1e8; border-radius: 6px; }
       .summary span { display: block; color: #637485; font-size: 12px; font-weight: 700; text-transform: uppercase; }
       .summary strong { display: block; margin-top: 5px; overflow-wrap: anywhere; }
@@ -493,18 +576,22 @@ const buildReportHtml = (log) => {
           <h1>Healthcare CTI SOC ${escapeHtml(reportTitle)}</h1>
           <p>${escapeHtml(reportDescription)}</p>
         </div>
-        <span class="badge">${escapeHtml(log.tlp)}</span>
+        <div class="badges">
+          <span class="badge" style="background:${severityMeta.color}">${escapeHtml(severityMeta.label)}</span>
+          <span class="badge" style="background:${tlpMeta.color}">${escapeHtml(log.sharing_classification || log.tlp)}</span>
+        </div>
       </header>
       <section class="summary" aria-label="Report summary">
         <div><span>Status</span><strong>${escapeHtml(status)}</strong></div>
+        <div><span>Severity</span><strong>${escapeHtml(severityMeta.label)}</strong></div>
         <div><span>Category</span><strong>${escapeHtml(log.category)}</strong></div>
-        <div><span>Observed Time</span><strong>${escapeHtml(`${log.date} ${log.timestamp}`)}</strong></div>
+        <div><span>${escapeHtml(getReportTimeLabel(log))}</span><strong>${escapeHtml(getReportTimeValue(log))}</strong></div>
       </section>
       <h2>Log Details</h2>
       <table><tbody>${rows}</tbody></table>
       ${featureRows ? `<h2>12 Model Features</h2><table><tbody>${featureRows}</tbody></table>` : ''}
       ${probabilityRows ? `<h2>Class Probabilities</h2><table><tbody>${probabilityRows}</tbody></table>` : ''}
-      <h2>Four-Source API Evidence</h2>
+      <h2>Threat-Intelligence Evidence</h2>
       <table class="provider-table">
         <thead><tr><th>Provider</th><th>Query status</th><th>API result for this log</th></tr></thead>
         <tbody>${providerRows}</tbody>
@@ -661,13 +748,18 @@ export default function Dashboard({ onLogout }) {
       if (forceRefresh) {
         await fetch(`${API_BASE_URL}/api/vulnerabilities/refresh`, { method: 'POST' });
       }
-      const [statusResponse, postureResponse, alertsResponse, databaseResponse, investigationsResponse, modelResponse] = await Promise.all([
+      const [statusResponse, postureResponse, alertsResponse, databaseResponse, investigationsResponse, modelResponse, connectivityResponse] = await Promise.all([
         fetch(`${API_BASE_URL}/api/intelligence/status`),
         fetch(`${API_BASE_URL}/api/vulnerabilities/posture`),
         fetch(`${API_BASE_URL}/api/alerts?limit=4`),
         fetch(`${API_BASE_URL}/api/database/status`),
         fetch(`${API_BASE_URL}/api/investigations?limit=${MAX_LOGS}`),
         fetch(`${API_BASE_URL}/api/model`),
+        fetch(`${API_BASE_URL}/api/intelligence/connectivity-check`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force_refresh: forceRefresh }),
+        }),
       ]);
       if (statusResponse.ok) {
         const statusPayload = await statusResponse.json();
@@ -691,6 +783,10 @@ export default function Dashboard({ onLogout }) {
       }
       if (modelResponse.ok) {
         setModelInfo(await modelResponse.json());
+      }
+      if (connectivityResponse.ok) {
+        const connectivityPayload = await connectivityResponse.json();
+        setSourceStatus(connectivityPayload.sources || {});
       }
     } catch {
       const offlineSource = { status: 'error' };
@@ -724,6 +820,7 @@ export default function Dashboard({ onLogout }) {
         ...sample,
         date: now.toISOString().slice(0, 10),
         timestamp: now.toLocaleTimeString('en-GB'),
+        replay_time: now.toISOString(),
         replay_sequence: cursor + index + 1,
         replay_stream: true,
       }));
@@ -786,7 +883,7 @@ export default function Dashboard({ onLogout }) {
       (acc, log) => {
         const isThreat = log.evaluation_mode
           ? log.traffic_class !== 'Benign'
-          : log.is_threat === 1 || log.tlp === 'TLP:RED' || log.is_in_otx;
+          : log.is_threat === 1;
         acc.total += 1;
         acc.threats += isThreat ? 1 : 0;
         acc.safe += isThreat ? 0 : 1;
@@ -928,25 +1025,56 @@ export default function Dashboard({ onLogout }) {
     setFilters(DEFAULT_FILTERS);
   };
 
+  const checkApiConnections = async (log, forceRefresh = false) => {
+    setLiveEvidenceLoading(true);
+    setLiveEvidenceMessage('Verifying live connections to AlienVault OTX, VirusTotal, OSV, and NIST NVD...');
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/intelligence/connectivity-check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force_refresh: forceRefresh }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || payload.detail || 'API connection check failed.');
+      setSourceStatus(payload.sources || {});
+      setSelectedReportLog((current) => (
+        current?.log_id === log.log_id
+          ? attachProviderConnections(current, payload.sources || {}, payload.checked_at)
+          : current
+      ));
+      setLiveEvidenceMessage(
+        payload.all_four_connected
+          ? 'All four APIs are connected. They were not used as evidence for this row because it contains no attributable indicator.'
+          : 'Connection check completed. At least one API is unavailable; see the provider status below.',
+      );
+    } catch (error) {
+      setLiveEvidenceMessage(error.message || 'API connection check failed.');
+    } finally {
+      setLiveEvidenceLoading(false);
+    }
+  };
+
   const handlePreviewReport = (log) => {
-    setSelectedReportLog(log);
+    const connectedLog = attachProviderConnections(log, sourceStatus);
+    setSelectedReportLog(connectedLog);
     setLiveEvidenceMessage(
       log.evidence_mode === 'live_api'
         ? `Live API evidence checked at ${log.live_evidence_checked_at || 'the latest refresh'}.`
-        : 'This report currently shows saved evidence. Use the live refresh to contact all four APIs now.',
+        : log.evidence_mode === 'not_applicable'
+          ? 'Checking the four API connections. This evaluation row itself contains no attributable IoC, CVE, or package.'
+          : 'This report shows the evidence returned for indicators present in the event.',
     );
-    if (log.evaluation_mode && log.evidence_mode !== 'live_api') {
-      void refreshLiveEvidence(log, false);
+    if (log.evaluation_mode) {
+      void checkApiConnections(connectedLog, false);
     }
   };
 
   const refreshLiveEvidence = async (log, forceRefresh = true) => {
-    if (!log?.evaluation_mode) return;
+    if (!log?.live_evidence_endpoint) return;
     setLiveEvidenceLoading(true);
     setLiveEvidenceMessage('Connecting to AlienVault OTX, VirusTotal, OSV, and NIST NVD...');
     try {
-      const endpoint = log.live_evidence_endpoint
-        || `/api/evaluation-samples/${encodeURIComponent(log.log_id)}/live-evidence`;
+      const endpoint = log.live_evidence_endpoint;
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1091,7 +1219,7 @@ export default function Dashboard({ onLogout }) {
             </article>
             <article>
               <ShieldCheck size={18} />
-              <div><strong>TLP handling</strong><span>Automated traffic handling labels</span></div>
+              <div><strong>TLP sharing</strong><span>Information-sharing classification, separate from severity</span></div>
             </article>
             <article>
               <Globe2 size={18} />
@@ -1118,7 +1246,7 @@ export default function Dashboard({ onLogout }) {
               title="Run the bundled external test fixture through CatBoost, then enrich its indicators with OTX, VirusTotal, NVD, and OSV"
             >
               <Activity className={integrationLoading ? 'spin' : ''} size={17} />
-              {integrationLoading ? 'Analyzing...' : 'Run end-to-end test'}
+              {integrationLoading ? 'Analyzing...' : 'Run model + 4 API test'}
             </button>
             <div className={`connection-pill ${connectionStatus}`}>
               <ConnectionIcon size={16} />
@@ -1188,7 +1316,7 @@ export default function Dashboard({ onLogout }) {
                 <ShieldCheck size={16} />
                 <span>
                   Full scientific evaluation: <strong>{Number(modelInfo.evaluation?.official_test_rows || 47711).toLocaleString()}</strong> untouched Official TEST rows.
-                  Evaluation replay: <strong>{Number(modelInfo.evaluation?.website_replay_rows || 300)}</strong> unique rows at <strong>{(toFiniteNumber(modelInfo.evaluation?.website_replay_accuracy || (284 / 300)) * 100).toFixed(1)}%</strong> accuracy with saved OTX, VirusTotal, OSV, and NVD evidence.
+                  Evaluation replay: <strong>{Number(modelInfo.evaluation?.website_replay_rows || 300)}</strong> unique rows at <strong>{(toFiniteNumber(modelInfo.evaluation?.website_replay_accuracy || (278 / 300)) * 100).toFixed(1)}%</strong> accuracy. CTI is shown only for logs that include real indicators.
                 </span>
               </div>
               <div className="pipeline-explainer">
@@ -1274,7 +1402,7 @@ export default function Dashboard({ onLogout }) {
                       <th>Sample</th>
                       <th>True family</th>
                       <th>Prediction</th>
-                      <th>Confidence</th>
+                      <th>Predicted-class confidence</th>
                       <th>Result</th>
                       <th>Official source row</th>
                       <th>Report</th>
@@ -1316,7 +1444,7 @@ export default function Dashboard({ onLogout }) {
                 </div>
               </div>
               <p className="dataset-note evaluation-note">
-                Each evaluation report includes the saved CatBoost prediction, risk score, response actions, and evidence returned by OTX, VirusTotal, OSV, and NVD. The replay is a presentation stream and does not insert duplicate incident records into the database.
+                Each evaluation report includes the saved CatBoost prediction, model-derived risk, 12 features, and class probabilities. CTI providers are not queried because these exported flow rows contain no attributable IoC, CVE, or package. The replay does not insert duplicate incident records into the database.
               </p>
             </>
           )}
@@ -1582,7 +1710,11 @@ export default function Dashboard({ onLogout }) {
           reportRef={reportRef}
           onClose={() => setSelectedReportLog(null)}
           onInstall={() => handleInstallReport(selectedReportLog)}
-          onRefreshLive={() => refreshLiveEvidence(selectedReportLog)}
+          onRefreshLive={() => (
+            selectedReportLog.evaluation_mode
+              ? checkApiConnections(selectedReportLog, true)
+              : refreshLiveEvidence(selectedReportLog)
+          )}
           liveEvidenceLoading={liveEvidenceLoading}
           liveEvidenceMessage={liveEvidenceMessage}
         />
@@ -1654,12 +1786,14 @@ function FilterSelect({ label, value, onChange, children }) {
 
 function LogRow({ log, onPreview, onInstall }) {
   const tlpMeta = TLP_META[log.tlp] || TLP_META['TLP:CLEAR'];
+  const severityMeta = SEVERITY_META[log.severity] || SEVERITY_META.low;
   const categoryMeta = CATEGORY_META[log.category] || { label: log.category, icon: Activity, color: '#92a4b7' };
   const CategoryIcon = categoryMeta.icon;
-  const isThreat = log.is_threat === 1 || log.tlp === 'TLP:RED' || log.is_in_otx;
+  const isThreat = log.evaluation_mode ? log.traffic_class !== 'Benign' : log.is_threat === 1;
+  const statusLabel = getLogThreatStatus(log);
 
   return (
-    <article className={`log-row ${tlpMeta.tone}`}>
+    <article className={`log-row severity-${severityMeta.tone}`}>
       <div className="log-main">
         <div className="log-title">
           <span className="category-chip" style={{ '--chip': categoryMeta.color }}>
@@ -1667,6 +1801,7 @@ function LogRow({ log, onPreview, onInstall }) {
             {categoryMeta.label}
           </span>
           <strong>{log.log_id}</strong>
+          <span className={`severity-chip ${severityMeta.tone}`}>{severityMeta.label}</span>
           <span className={`tlp-chip ${tlpMeta.tone}`}>{log.tlp}</span>
         </div>
         <p>
@@ -1677,7 +1812,7 @@ function LogRow({ log, onPreview, onInstall }) {
         <div className="log-meta">
           <span>{log.department}</span>
           <span>{log.data_mb} KB</span>
-          <span>{Math.round(log.risk_probability * 100)}% {log.risk_level} risk</span>
+          <span>{Math.round(log.attack_probability * 100)}% attack probability · {log.severity} severity</span>
           <span>{log.date} {log.timestamp}</span>
           <span>Intel: {log.intel_verdict}</span>
         </div>
@@ -1685,7 +1820,7 @@ function LogRow({ log, onPreview, onInstall }) {
       <div className="log-actions">
         <span className={isThreat ? 'status-tag threat' : 'status-tag safe'}>
           {isThreat ? <ShieldAlert size={14} /> : <CheckCircle2 size={14} />}
-          {isThreat ? 'Threat' : 'Safe'}
+          {statusLabel}
         </span>
         <button type="button" onClick={() => onPreview(log)}>
           <Eye size={15} />
@@ -1693,7 +1828,7 @@ function LogRow({ log, onPreview, onInstall }) {
         </button>
         <button type="button" className="install-report-button" onClick={() => onInstall(log)}>
           <FileText size={15} />
-          Install
+          Download PDF
         </button>
       </div>
     </article>
@@ -1718,15 +1853,19 @@ function ReportModal({
             <h2 id="report-title">{log.log_id}</h2>
           </div>
           <div className="report-toolbar-actions">
-            {log.evaluation_mode && (
+            {(log.evaluation_mode || Boolean(log.live_evidence_endpoint)) && (
               <button type="button" onClick={onRefreshLive} disabled={liveEvidenceLoading}>
                 <RefreshCw className={liveEvidenceLoading ? 'spin' : ''} size={16} />
-                {liveEvidenceLoading ? 'Connecting...' : 'Refresh 4 Live APIs'}
+                {liveEvidenceLoading
+                  ? 'Connecting...'
+                  : log.evaluation_mode
+                    ? 'Verify API connectivity'
+                    : 'Refresh Live Evidence'}
               </button>
             )}
             <button type="button" onClick={onInstall}>
               <Download size={16} />
-              Install Report
+              Download PDF
             </button>
             <button type="button" className="report-close-button" onClick={onClose} aria-label="Close report preview">
               <X size={18} />
@@ -1778,6 +1917,7 @@ function ProviderResult({ provider }) {
 
 function ReportDocument({ log, reportRef }) {
   const tlpMeta = TLP_META[log.tlp] || TLP_META['TLP:CLEAR'];
+  const severityMeta = SEVERITY_META[log.severity] || SEVERITY_META.low;
   const status = getLogThreatStatus(log);
   const recommendations = getReportRecommendations(log);
   const providers = getProviderRows(log);
@@ -1798,7 +1938,10 @@ function ReportDocument({ log, reportRef }) {
               : 'Generated from an analyzed IoMT network-flow event and its CTI evidence.'}
           </span>
         </div>
-        <strong style={{ backgroundColor: tlpMeta.color }}>{log.tlp}</strong>
+        <div className="report-header-badges">
+          <strong style={{ backgroundColor: severityMeta.color }}>{severityMeta.label}</strong>
+          <strong style={{ backgroundColor: tlpMeta.color }}>{log.sharing_classification || log.tlp}</strong>
+        </div>
       </header>
 
       <section className="report-summary-grid" aria-label="Report summary">
@@ -1807,12 +1950,16 @@ function ReportDocument({ log, reportRef }) {
           <strong>{status}</strong>
         </div>
         <div>
+          <span>Severity</span>
+          <strong>{severityMeta.label}</strong>
+        </div>
+        <div>
           <span>Category</span>
           <strong>{log.category}</strong>
         </div>
         <div>
-          <span>Observed Time</span>
-          <strong>{log.date} {log.timestamp}</strong>
+          <span>{getReportTimeLabel(log)}</span>
+          <strong>{getReportTimeValue(log)}</strong>
         </div>
       </section>
 
@@ -1858,14 +2005,19 @@ function ReportDocument({ log, reportRef }) {
       </section>
 
       <section className="report-section">
-        <h2>Four-Source API Evidence</h2>
+        <h2>{log.evaluation_mode ? 'API Connectivity (not per-log evidence)' : 'Threat-Intelligence Evidence'}</h2>
+        <p className="report-method-note">
+          {log.evaluation_mode
+            ? 'This held-out model row contains numeric flow features only. The statuses below verify that each API is reachable; no provider result is attributed to this row because it has no IP, domain, URL, hash, CVE, or package identifier.'
+            : 'Providers are queried only when this log contains a compatible indicator: OTX and VirusTotal for IP/domain/URL/hash values; OSV and NVD for CVE or vulnerability references.'}
+        </p>
         <div className="report-table-wrap">
           <table className="report-provider-table">
             <thead>
               <tr>
                 <th>Provider</th>
-                <th>Query status</th>
-                <th>API result for this log</th>
+                <th>{log.evaluation_mode ? 'Connection status' : 'Query status'}</th>
+                <th>{log.evaluation_mode ? 'Why this row was not queried' : 'API result for this log'}</th>
               </tr>
             </thead>
             <tbody>

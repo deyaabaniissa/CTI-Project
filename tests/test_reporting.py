@@ -118,6 +118,35 @@ class ProviderReportTests(unittest.TestCase):
         self.assertIn("Apply updates per vendor instructions.", actions[0]["action"])
         self.assertEqual(actions[0]["evidence_sources"], ["OSV", "NIST NVD"])
 
+    def test_provider_failure_preserves_http_diagnostics(self):
+        rows = summarize_provider_evidence(
+            [
+                {
+                    "indicator": "CVE-2021-44228",
+                    "type": "cve",
+                    "coverage": {
+                        "applicable_sources": ["osv", "nvd"],
+                        "queried_sources": ["osv", "nvd"],
+                        "available_sources": ["nvd"],
+                    },
+                    "sources": {
+                        "osv": {
+                            "available": False,
+                            "error": "HTTP 429: rate limited",
+                            "error_type": "http_error",
+                            "http_status": 429,
+                        },
+                        "nvd": {"available": True, "found": False, "records": []},
+                    },
+                }
+            ],
+            STATES,
+        )
+        osv = next(row for row in rows if row["provider_id"] == "osv")
+        self.assertEqual(osv["status"], "unavailable")
+        self.assertIn("HTTP 429", osv["result"])
+        self.assertEqual(osv["observations"][0]["metrics"]["http_status"], 429)
+
 
 if __name__ == "__main__":
     unittest.main()

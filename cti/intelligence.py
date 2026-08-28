@@ -24,6 +24,31 @@ NVD_API_BASE = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 OTX_API_BASE = "https://otx.alienvault.com/api/v1"
 VT_API_BASE = "https://www.virustotal.com/api/v3"
 
+
+class IntelligenceRequestError(RuntimeError):
+    """Structured provider error safe to expose in an analyst report."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_type: str,
+        http_status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+        self.http_status = http_status
+
+
+def _error_payload(error: Exception) -> dict[str, Any]:
+    return {
+        "available": False,
+        "found": False,
+        "error": str(error)[:500],
+        "error_type": str(getattr(error, "error_type", "provider_error")),
+        "http_status": getattr(error, "http_status", None),
+    }
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -50,9 +75,26 @@ def _request_json(
             return json.loads(payload) if payload else {}
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:500]
-        raise RuntimeError(f"HTTP {exc.code}: {detail or exc.reason}") from exc
+        raise IntelligenceRequestError(
+            f"HTTP {exc.code}: {detail or exc.reason}",
+            error_type="http_error",
+            http_status=exc.code,
+        ) from exc
     except URLError as exc:
-        raise RuntimeError(f"Network error: {exc.reason}") from exc
+        raise IntelligenceRequestError(
+            f"Network error: {exc.reason}",
+            error_type="network_error",
+        ) from exc
+    except TimeoutError as exc:
+        raise IntelligenceRequestError(
+            "Network timeout while waiting for the provider.",
+            error_type="timeout",
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise IntelligenceRequestError(
+            "Provider returned a response that was not valid JSON.",
+            error_type="invalid_json",
+        ) from exc
 
 
 async def request_json(
@@ -63,14 +105,24 @@ async def request_json(
     body: dict[str, Any] | None = None,
     timeout: float = 15.0,
 ) -> dict[str, Any]:
-    return await asyncio.to_thread(
-        _request_json,
-        method,
-        url,
-        headers=headers,
-        body=body,
-        timeout=timeout,
-    )
+    for attempt in range(3):
+        try:
+            return await asyncio.to_thread(
+                _request_json,
+                method,
+                url,
+                headers=headers,
+                body=body,
+                timeout=timeout,
+            )
+        except IntelligenceRequestError as exc:
+            retryable = exc.error_type in {"network_error", "timeout"} or (
+                exc.http_status == 429 or bool(exc.http_status and exc.http_status >= 500)
+            )
+            if not retryable or attempt == 2:
+                raise
+            await asyncio.sleep(0.75 * (2**attempt))
+    raise AssertionError("Unreachable retry state")
 
 
 class ThreatIntelligenceService:
@@ -206,7 +258,7 @@ class ThreatIntelligenceService:
             responses = await asyncio.gather(*tasks.values(), return_exceptions=True)
             for source, response in zip(tasks, responses):
                 if isinstance(response, Exception):
-                    source_results[source] = {"available": False, "error": str(response)}
+                    source_results[source] = _error_payload(response)
                 else:
                     source_results[source] = response
 
@@ -263,7 +315,7 @@ class ThreatIntelligenceService:
             osv = await self._lookup_osv_reference(indicator)
             source_results["osv"] = osv
         except Exception as exc:
-            osv = {"available": False, "found": False, "error": str(exc)}
+            osv = _error_payload(exc)
             source_results["osv"] = osv
 
         cve_ids: list[str] = []
@@ -286,12 +338,7 @@ class ThreatIntelligenceService:
             }
         except Exception as exc:
             nvd_records = []
-            source_results["nvd"] = {
-                "available": False,
-                "found": False,
-                "records": [],
-                "error": str(exc),
-            }
+            source_results["nvd"] = {**_error_payload(exc), "records": []}
 
         found = bool(osv.get("found") or nvd_records)
         max_cvss = max((float(item.get("cvss", 0.0) or 0.0) for item in nvd_records), default=0.0)
@@ -337,7 +384,7 @@ class ThreatIntelligenceService:
             }
             self._record("osv", started)
             return result
-        except RuntimeError as exc:
+        except IntelligenceRequestError as exc:
             if str(exc).startswith("HTTP 404:"):
                 self._record("osv", started)
                 return {
@@ -654,36 +701,39 @@ class ThreatIntelligenceService:
             return []
         started = time.perf_counter()
         headers = {"apiKey": self.nvd_api_key} if self.nvd_api_key else {}
-        query = urlencode({"cveIds": ",".join(cve_ids)})
         try:
-            payload = await request_json(
-                "GET", f"{NVD_API_BASE}?{query}", headers=headers, timeout=30
-            )
             records = []
-            for entry in payload.get("vulnerabilities") or []:
-                cve = entry.get("cve") or {}
-                metrics = cve.get("metrics") or {}
-                score = 0.0
-                severity = "UNKNOWN"
-                for key in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
-                    candidates = metrics.get(key) or []
-                    if candidates:
-                        cvss_data = candidates[0].get("cvssData") or {}
-                        score = float(cvss_data.get("baseScore", 0.0) or 0.0)
-                        severity = cvss_data.get("baseSeverity") or candidates[0].get(
-                            "baseSeverity", "UNKNOWN"
-                        )
-                        break
-                records.append(
-                    {
-                        "cve_id": cve.get("id"),
-                        "cvss": score,
-                        "severity": severity,
-                        "known_exploited": bool(cve.get("cisaExploitAdd")),
-                        "cisa_due_date": cve.get("cisaActionDue"),
-                        "required_action": cve.get("cisaRequiredAction"),
-                    }
+            # NVD API 2.0 accepts the singular `cveId` parameter.  Sending the
+            # former `cveIds` value silently produced empty/error responses.
+            for cve_id in dict.fromkeys(cve_ids):
+                query = urlencode({"cveId": cve_id})
+                payload = await request_json(
+                    "GET", f"{NVD_API_BASE}?{query}", headers=headers, timeout=30
                 )
+                for entry in payload.get("vulnerabilities") or []:
+                    cve = entry.get("cve") or {}
+                    metrics = cve.get("metrics") or {}
+                    score = 0.0
+                    severity = "UNKNOWN"
+                    for key in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+                        candidates = metrics.get(key) or []
+                        if candidates:
+                            cvss_data = candidates[0].get("cvssData") or {}
+                            score = float(cvss_data.get("baseScore", 0.0) or 0.0)
+                            severity = cvss_data.get("baseSeverity") or candidates[0].get(
+                                "baseSeverity", "UNKNOWN"
+                            )
+                            break
+                    records.append(
+                        {
+                            "cve_id": cve.get("id"),
+                            "cvss": score,
+                            "severity": severity,
+                            "known_exploited": bool(cve.get("cisaExploitAdd")),
+                            "cisa_due_date": cve.get("cisaActionDue"),
+                            "required_action": cve.get("cisaRequiredAction"),
+                        }
+                    )
             self._record("nvd", started)
             return records
         except Exception as exc:

@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from cti.intelligence import ThreatIntelligenceService, classify_indicator, is_public_indicator
 
@@ -48,6 +48,31 @@ class IntelligenceRoutingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["coverage"]["applicable_sources"], ["osv", "nvd"])
             service._lookup_osv_reference.assert_awaited_once()
             service._lookup_nvd.assert_awaited_once()
+
+    async def test_nvd_uses_singular_cve_id_parameter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service = ThreatIntelligenceService(Path(directory))
+            response = {
+                "vulnerabilities": [
+                    {
+                        "cve": {
+                            "id": "CVE-2021-44228",
+                            "metrics": {
+                                "cvssMetricV31": [
+                                    {"cvssData": {"baseScore": 10.0, "baseSeverity": "CRITICAL"}}
+                                ]
+                            },
+                        }
+                    }
+                ]
+            }
+            with patch("cti.intelligence.request_json", new=AsyncMock(return_value=response)) as mocked:
+                records = await service._lookup_nvd(["CVE-2021-44228"])
+
+            requested_url = mocked.await_args.args[1]
+            self.assertIn("cveId=CVE-2021-44228", requested_url)
+            self.assertNotIn("cveIds=", requested_url)
+            self.assertEqual(records[0]["cvss"], 10.0)
 
 
 if __name__ == "__main__":

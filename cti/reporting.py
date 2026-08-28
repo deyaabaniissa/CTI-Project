@@ -36,7 +36,10 @@ def _observation(provider: str, evidence: Mapping[str, Any], payload: Mapping[st
             "indicator_type": indicator_type,
             "verdict": "error",
             "result": f"Lookup failed: {str(payload['error'])[:180]}",
-            "metrics": {},
+            "metrics": {
+                "error_type": payload.get("error_type") or "provider_error",
+                "http_status": payload.get("http_status"),
+            },
         }
 
     if provider == "otx":
@@ -168,7 +171,14 @@ def summarize_provider_evidence(
             row["result"] = "Applicable, but no query was completed."
         elif not row["available"]:
             row["status"] = "unavailable"
-            row["result"] = "The provider was queried but did not return an available result."
+            errors = [
+                observation["result"]
+                for observation in row["observations"]
+                if observation.get("verdict") == "error"
+            ]
+            row["result"] = " | ".join(errors) or (
+                "The provider was queried but did not return an available result."
+            )
         else:
             row["status"] = "available"
             row["result"] = " | ".join(

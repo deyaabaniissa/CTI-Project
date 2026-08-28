@@ -12,6 +12,8 @@ outputs/flask_investigations.jsonl
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/flask_*.log
+flask_server.*.log
 video_frames/
 data/archive/
 data/raw/

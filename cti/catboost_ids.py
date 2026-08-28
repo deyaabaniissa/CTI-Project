@@ -166,7 +166,7 @@ class CatBoostIDSService:
                 "official_test_untouched": True,
                 "website_replay_rows": 300,
                 "website_replay_rows_per_family": 50,
-                "website_replay_accuracy": 284 / 300,
+                "website_replay_accuracy": 278 / 300,
             },
         }
 
