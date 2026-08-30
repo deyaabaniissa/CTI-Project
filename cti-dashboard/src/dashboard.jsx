@@ -1157,6 +1157,9 @@ export default function Dashboard({ onLogout }) {
         live_fused_risk: toFiniteNumber(payload.live_fused_risk),
         live_cti_score: toFiniteNumber(payload.live_cti_score),
         risk_adjustment_applied: Boolean(payload.risk_adjustment_applied),
+        recommended_actions: Array.isArray(payload.recommended_actions)
+          ? payload.recommended_actions
+          : log.recommended_actions,
         ...(payload.risk_adjustment_applied
           ? {
               risk_score: toFiniteNumber(payload.live_fused_risk),
@@ -1171,19 +1174,20 @@ export default function Dashboard({ onLogout }) {
                 const text = String(reason);
                 return !text.startsWith('Attack probability P(non-Benign):')
                   && !text.startsWith('CatBoost attack probability P(non-Benign):')
+                  && !text.startsWith('Combined model, CTI, and asset risk:')
                   && !text.startsWith('Live fused risk:')
                   && !text.startsWith('Live CTI returned context-only evidence');
               })
             : []),
           payload.live_risk_reason,
         ].filter(Boolean),
-        intel_verdict: payload.evidence_mode === 'capture_and_dependency_context'
+        intel_verdict: payload.intel_verdict || (payload.evidence_mode === 'capture_and_dependency_context'
           ? 'Context only — PCAP and platform findings are not attributed to this TEST row'
           : payload.evidence_mode === 'capture_context'
             ? 'Context only — capture-level IoCs are not attributed to this TEST row'
           : payload.all_four_connected
             ? 'Not applicable — no row-level indicator was supplied'
-            : 'API connectivity check completed with partial availability',
+            : 'API connectivity check completed with partial availability'),
       });
       setSelectedReportLog(updated);
       setLiveEvidenceMessage(payload.message || (

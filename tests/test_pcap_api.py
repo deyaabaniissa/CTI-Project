@@ -276,6 +276,68 @@ class PcapApiTests(unittest.TestCase):
         queried_event = enrich_event.await_args.args[0]
         self.assertNotIn("context.example", queried_event["indicators"])
 
+    def test_attributed_live_report_refreshes_verdict_and_recommendations(self) -> None:
+        investigation_id = "report-live-attributed"
+        stored_log = {
+            "investigation_id": investigation_id,
+            "traffic_class": "DoS",
+            "attack_probability": 0.95,
+            "source_ip": "8.8.8.8",
+            "destination_target": "hospital asset",
+            "features": {},
+            "indicator_evidence": [],
+        }
+        evidence = [{
+            "indicator": "8.8.8.8",
+            "type": "ipv4",
+            "verdict": "malicious",
+            "confidence": 0.8,
+            "sources": {},
+            "provenance": {"attributable_to_log": True},
+        }]
+        provider_rows = [{
+            "provider_id": "virustotal",
+            "provider": "VirusTotal",
+            "observations": [{"verdict": "malicious"}],
+            "queried": True,
+            "available": True,
+            "status": "available",
+        }]
+        states = {
+            provider: {
+                "configured": True,
+                "status": "live",
+                "last_success": "2026-08-30T00:00:00+00:00",
+                "last_error": None,
+            }
+            for provider in ("otx", "virustotal", "osv", "nvd")
+        }
+        with (
+            patch.object(flask_app.database, "list_dashboard_logs", return_value=[stored_log]),
+            patch.object(flask_app, "enrich_event", new=AsyncMock(return_value=evidence)),
+            patch.object(flask_app, "summarize_provider_evidence", return_value=provider_rows),
+            patch.object(flask_app.intelligence, "status", return_value={"sources": states}),
+        ):
+            response = self.client.post(
+                f"/api/investigations/{investigation_id}/live-evidence",
+                json={"force_refresh": True},
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        payload = response.get_json()
+        self.assertEqual(payload["evidence_mode"], "event_attributed_live")
+        self.assertTrue(payload["risk_adjustment_applied"])
+        self.assertIn("threat evidence confirmed", payload["intel_verdict"].lower())
+        self.assertTrue(payload["recommended_actions"])
+        self.assertTrue(any("risk=" in item["evidence"] for item in payload["recommended_actions"]))
+
+    def test_empty_live_cti_reason_does_not_call_missing_evidence_context(self) -> None:
+        result = flask_app.live_fused_risk({"attack_probability": 0.10}, [])
+
+        self.assertFalse(result["applied"])
+        self.assertIn("No attributable indicator", result["reason"])
+        self.assertNotIn("context-only evidence", result["reason"])
+
     def test_context_only_cti_does_not_change_model_probability(self) -> None:
         result = flask_app.live_fused_risk(
             {"attack_probability": 0.5657},

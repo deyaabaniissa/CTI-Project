@@ -163,14 +163,19 @@ def live_fused_risk(
     if not attributable:
         score = round(100.0 * model_attack_score, 2)
         level = "critical" if score >= 80 else "high" if score >= 60 else "medium" if score >= 40 else "low"
+        boundary = (
+            "Live CTI returned context-only evidence"
+            if evidence
+            else "No attributable indicator was available for live CTI enrichment"
+        )
         return {
             "score": score,
             "level": level,
             "cti_score": 0.0,
             "applied": False,
             "reason": (
-                "Live CTI returned context-only evidence, so it was not fused into this "
-                f"row. CatBoost P(non-Benign) remains {model_attack_score:.2%}."
+                f"{boundary}, so no CTI adjustment was applied. "
+                f"CatBoost P(non-Benign) remains {model_attack_score:.2%}."
             ),
         }
 
@@ -1352,6 +1357,20 @@ def investigation_live_evidence(investigation_id: str) -> Any:
         provider["connection_error"] = state.get("last_error")
         provider["lookup_mode"] = "live_api"
     fused_risk = live_fused_risk(log, evidence)
+    live_verdicts = {
+        str(item.get("verdict") or "unknown").lower()
+        for item in evidence
+    }
+    if live_verdicts & {"malicious", "vulnerable"}:
+        intel_verdict = "Live CTI threat evidence confirmed for this event"
+    elif evidence:
+        intel_verdict = "Live CTI checked — no confirmed threat evidence"
+    else:
+        intel_verdict = "CTI not applicable — no compatible event indicator"
+    live_prediction = {
+        "predicted_family": str(log.get("traffic_class") or "Unknown"),
+    }
+    live_actions = recommendations(event, live_prediction, provider_evidence, fused_risk["score"])
 
     return jsonify({
         "investigation_id": investigation_id,
@@ -1370,6 +1389,8 @@ def investigation_live_evidence(investigation_id: str) -> Any:
         "live_cti_score": fused_risk["cti_score"],
         "risk_adjustment_applied": fused_risk["applied"],
         "live_risk_reason": fused_risk["reason"],
+        "intel_verdict": intel_verdict,
+        "recommended_actions": live_actions,
         "message": (
             f"Fresh live provider queries completed at {checked_at} for this report's own indicators; "
             "the returned evidence was not loaded from or written back to the stored report."
