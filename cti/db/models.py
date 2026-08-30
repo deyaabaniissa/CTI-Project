@@ -227,6 +227,37 @@ class HospitalEvent(UUIDPrimaryKey, Timestamped, Base):
     dataset_label: Mapped[int | None] = mapped_column(Integer)
 
 
+class PcapInvestigation(UUIDPrimaryKey, Timestamped, Base):
+    """A packet-capture investigation kept separate from model-flow events.
+
+    A capture can contain attributable IoCs even when it does not contain the
+    exact 12 aggregated features required by the CatBoost model.  Persisting it
+    separately prevents CTI evidence from being mistaken for a model result.
+    """
+
+    __tablename__ = "pcap_investigations"
+    __table_args__ = (
+        Index("ix_pcap_investigations_created_at", "created_at"),
+        Index("ix_pcap_investigations_sha256", "file_sha256"),
+    )
+
+    investigation_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    file_name: Mapped[str] = mapped_column(String(512), nullable=False)
+    file_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    packets_read: Mapped[int] = mapped_column(Integer, nullable=False)
+    flow_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    indicator_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    public_indicator_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    predicted_family: Mapped[str | None] = mapped_column(String(64))
+    risk_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    risk_level: Mapped[Severity] = mapped_column(
+        Enum(Severity, native_enum=False), default=Severity.info, nullable=False
+    )
+    report_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+
+
 class Indicator(UUIDPrimaryKey, Timestamped, Base):
     __tablename__ = "indicators"
     __table_args__ = (UniqueConstraint("indicator_type", "normalized_value", name="uq_indicators_type_value"), Index("ix_indicators_value", "normalized_value"))

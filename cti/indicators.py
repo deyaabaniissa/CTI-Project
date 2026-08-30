@@ -69,7 +69,27 @@ def is_public_indicator(value: str, indicator_type: str) -> bool:
         return True
     if indicator_type not in {"ipv4", "ipv6"}:
         if indicator_type == "domain":
-            return value not in {"localhost"} and not value.endswith((".local", ".internal", ".lan"))
+            return value not in {"localhost"} and not value.endswith(
+                (
+                    ".local",
+                    ".internal",
+                    ".lan",
+                    ".home.arpa",
+                    ".in-addr.arpa",
+                    ".ip6.arpa",
+                )
+            )
         return True
 
-    return ipaddress.ip_address(value).is_global
+    address = ipaddress.ip_address(value)
+    # ``is_global`` alone is not a sufficient egress policy: Python may mark
+    # multicast space as globally scoped even though it is not an attributable
+    # Internet host.  Keep every non-unicast/special address local.
+    return bool(
+        address.is_global
+        and not address.is_multicast
+        and not address.is_reserved
+        and not address.is_unspecified
+        and not address.is_loopback
+        and not address.is_link_local
+    )

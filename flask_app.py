@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import ast
+import csv
+import hashlib
 import hmac
 import json
 import os
 import random
 import secrets
+import tempfile
 import threading
 import time
 from collections import deque
@@ -17,11 +21,13 @@ from typing import Any, Mapping
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory, session
 from flask_sock import Sock
+from werkzeug.utils import secure_filename
 
 from cti.catboost_ids import CatBoostIDSService
 from cti.db.site_persistence import SitePersistenceService
 from cti.extraction import extract_indicators
 from cti.intelligence import ThreatIntelligenceService
+from cti.pcap import extract_pcap_indicators
 from cti.reporting import summarize_provider_evidence
 
 
@@ -35,10 +41,31 @@ OFFICIAL_TEST_REPLAY_PATH = (
     / "evaluation"
     / "official_test_50_samples_per_family_full_results.json"
 )
+SPOOFING_PCAP_EVIDENCE_PATH = PROJECT_ROOT / "pcap_attributable_evidence.json"
+PCAP_API_READY_INDICATORS_PATH = PROJECT_ROOT / "pcap_api_ready_indicators.csv"
+PROJECT_SECURITY_PACKAGE_NAMES = ("flask", "dompurify", "nanoid", "postcss")
 RESULTS_PATH = PROJECT_ROOT / "outputs" / "flask_investigations.jsonl"
+PCAP_RESULT_PATH = PROJECT_ROOT / "outputs" / "pcap_investigations.jsonl"
+
+PCAP_SAMPLE_FILES = {
+    "benign": PROJECT_ROOT / "CIC dataset" / "WiFi_and_MQTT" / "attacks" / "PCAP" / "test" / "Benign_test.pcap",
+    "ddos": PROJECT_ROOT / "CIC dataset" / "WiFi_and_MQTT" / "attacks" / "PCAP" / "test" / "TCP_IP-DDoS-ICMP1_test.pcap",
+    "dos": PROJECT_ROOT / "CIC dataset" / "WiFi_and_MQTT" / "attacks" / "PCAP" / "test" / "MQTT-DoS-Connect_Flood_test.pcap",
+    "mqtt": PROJECT_ROOT / "CIC dataset" / "WiFi_and_MQTT" / "attacks" / "PCAP" / "test" / "MQTT-Malformed_Data_test.pcap",
+    "recon": PROJECT_ROOT / "CIC dataset" / "WiFi_and_MQTT" / "attacks" / "PCAP" / "test" / "Recon-Ping_Sweep_test.pcap",
+    "spoofing": PROJECT_ROOT / "CIC dataset" / "WiFi_and_MQTT" / "attacks" / "PCAP" / "test" / "ARP_Spoofing_test.pcap",
+}
 
 load_dotenv(PROJECT_ROOT / ".env")
 RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class AsyncRunner:
@@ -223,10 +250,282 @@ def evaluation_provider_evidence(row: Mapping[str, Any]) -> list[dict[str, Any]]
         provider["connection_status"] = str(state.get("status") or "unknown")
         provider["connection_verified_at"] = state.get("last_success")
         provider["connection_error"] = state.get("last_error")
-        provider["result"] = (
-            "Not queried: CICIoMT2024 flow rows contain numeric model features "
-            "but no IP/domain/hash, CVE, or package identifier attributable to this row."
+        if state.get("status") == "live":
+            provider["result"] = (
+                f"Live API connection verified at {state.get('last_success') or 'the latest check'}. "
+                "No compatible row-specific indicator was sent, so no provider finding is "
+                "claimed as evidence for this exact numeric TEST row."
+            )
+        else:
+            provider["result"] = (
+                "No compatible row-specific indicator was available, and the latest API "
+                f"connection state is {state.get('status') or 'unknown'}."
+            )
+    return evidence
+
+
+@lru_cache(maxsize=1)
+def load_spoofing_capture_indicators() -> tuple[dict[str, Any], ...]:
+    """Load public IoCs attributable to the official ARP Spoofing capture.
+
+    These are capture-level context, not per-row fields.  The report labels
+    that distinction explicitly and never assigns them to other families.
+    """
+
+    if not SPOOFING_PCAP_EVIDENCE_PATH.is_file():
+        return ()
+    payload = json.loads(SPOOFING_PCAP_EVIDENCE_PATH.read_text(encoding="utf-8"))
+    rows = payload.get("api_ready_indicators") if isinstance(payload, Mapping) else None
+    if not isinstance(rows, list):
+        return ()
+    valid = [
+        {
+            "value": str(row.get("value") or ""),
+            "indicator_type": str(row.get("indicator_type") or ""),
+            "observed_in": list(row.get("observed_in") or []),
+            "packet_numbers": list(row.get("packet_numbers") or []),
+            "flow_keys": list(row.get("flow_keys") or []),
+        }
+        for row in rows
+        if isinstance(row, Mapping) and str(row.get("value") or "").strip()
+    ]
+    return tuple(valid)
+
+
+async def enrich_spoofing_capture_context(
+    sample_number: int,
+    *,
+    force_refresh: bool,
+) -> list[dict[str, Any]]:
+    indicators = load_spoofing_capture_indicators()
+    if not indicators:
+        return []
+
+    domains = [row for row in indicators if row["indicator_type"] == "domain"]
+    addresses = [row for row in indicators if row["indicator_type"] in {"ipv4", "ipv6"}]
+    selected: list[dict[str, Any]] = []
+    if domains:
+        selected.append(domains[(sample_number - 1) % len(domains)])
+    if addresses:
+        selected.append(addresses[(sample_number - 1) % len(addresses)])
+
+    results = await asyncio.gather(
+        *(
+            intelligence.enrich_indicator(row["value"], force_refresh=force_refresh)
+            for row in selected
+        ),
+        return_exceptions=True,
+    )
+    evidence: list[dict[str, Any]] = []
+    for row, result in zip(selected, results):
+        if isinstance(result, Exception):
+            evidence.append({
+                "indicator": row["value"],
+                "type": row["indicator_type"],
+                "field": "ARP_Spoofing_test.pcap capture context",
+                "verdict": "unknown",
+                "confidence": 0.0,
+                "sources": {},
+                "coverage": {
+                    "applicable_sources": ["otx", "virustotal"],
+                    "configured_sources": [],
+                    "available_sources": [],
+                    "queried_sources": [],
+                    "complete": False,
+                },
+                "message": str(result)[:240],
+                "provenance": row,
+            })
+        else:
+            evidence.append({
+                **result,
+                "field": "ARP_Spoofing_test.pcap capture context",
+                "provenance": row,
+            })
+    return evidence
+
+
+@lru_cache(maxsize=8)
+def load_family_capture_indicators(family: str) -> tuple[dict[str, Any], ...]:
+    """Load the API-ready indicator catalog exported from the official PCAP.
+
+    The CSV is the requested bridge between numeric CICIoMT2024 model rows and
+    CTI lookups. Indicators remain capture context; they are never described as
+    native columns of one exact aggregated model row.
+    """
+
+    del family  # The supplied catalog currently represents one shared capture export.
+    if not PCAP_API_READY_INDICATORS_PATH.is_file():
+        return ()
+
+    def parsed_list(value: Any) -> list[Any]:
+        try:
+            parsed = ast.literal_eval(str(value or "[]"))
+        except (SyntaxError, ValueError):
+            return []
+        return list(parsed) if isinstance(parsed, (list, tuple, set)) else []
+
+    rows: list[dict[str, Any]] = []
+    with PCAP_API_READY_INDICATORS_PATH.open("r", encoding="utf-8-sig", newline="") as source:
+        for item in csv.DictReader(source):
+            value = str(item.get("value") or "").strip()
+            indicator_type = str(item.get("indicator_type") or "").strip().lower()
+            is_public = str(item.get("is_public") or "").strip().lower() in {"1", "true", "yes"}
+            if not value or not is_public:
+                continue
+            rows.append({
+                "value": value,
+                "indicator_type": indicator_type,
+                "observed_in": parsed_list(item.get("observed_in")),
+                "packet_numbers": parsed_list(item.get("packet_numbers")),
+                "flow_keys": parsed_list(item.get("flow_keys")),
+                "capture_file": PCAP_API_READY_INDICATORS_PATH.name,
+            })
+    return tuple(rows)
+
+
+@lru_cache(maxsize=1)
+def load_project_security_packages() -> tuple[dict[str, Any], ...]:
+    """Read exact package versions from the project's real dependency files.
+
+    These packages form a separate platform/SBOM evidence plane.  They are not
+    represented as native fields of a CICIoMT2024 numeric flow row.  The small
+    candidate list contains packages for which the bundled OSV-Scanner found a
+    current advisory; versions are still read dynamically from the source
+    files so stale or removed dependencies are never fabricated.
+    """
+
+    discovered: dict[str, dict[str, Any]] = {}
+    requirements_path = PROJECT_ROOT / "requirements.txt"
+    if requirements_path.is_file():
+        for raw_line in requirements_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.split("#", 1)[0].strip()
+            if "==" not in line:
+                continue
+            name, version = (part.strip() for part in line.split("==", 1))
+            canonical_name = name.lower().replace("_", "-")
+            if canonical_name not in PROJECT_SECURITY_PACKAGE_NAMES or not version:
+                continue
+            discovered[canonical_name] = {
+                "value": f"PyPI:{name}:{version}",
+                "indicator_type": "package",
+                "package_name": name,
+                "package_version": version,
+                "ecosystem": "PyPI",
+                "source_file": "requirements.txt",
+                "evidence_scope": "deployed_platform_dependency",
+            }
+
+    package_lock_path = PROJECT_ROOT / "cti-dashboard" / "package-lock.json"
+    if package_lock_path.is_file():
+        try:
+            lock_payload = json.loads(package_lock_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            lock_payload = {}
+        for package_path, package in (lock_payload.get("packages") or {}).items():
+            if not isinstance(package, Mapping):
+                continue
+            name = str(package.get("name") or "").strip()
+            if not name and "node_modules/" in str(package_path):
+                name = str(package_path).rsplit("node_modules/", 1)[-1].strip()
+            version = str(package.get("version") or "").strip()
+            canonical_name = name.lower().replace("_", "-")
+            if canonical_name not in PROJECT_SECURITY_PACKAGE_NAMES or not version:
+                continue
+            discovered[canonical_name] = {
+                "value": f"npm:{name}:{version}",
+                "indicator_type": "package",
+                "package_name": name,
+                "package_version": version,
+                "ecosystem": "npm",
+                "source_file": "cti-dashboard/package-lock.json",
+                "evidence_scope": "deployed_platform_dependency",
+            }
+
+    return tuple(
+        discovered[name]
+        for name in PROJECT_SECURITY_PACKAGE_NAMES
+        if name in discovered
+    )
+
+
+async def enrich_family_capture_context(
+    family: str,
+    sample_number: int,
+    *,
+    force_refresh: bool,
+) -> list[dict[str, Any]]:
+    indicators = load_family_capture_indicators(family)
+    if not indicators:
+        return []
+
+    domains = [row for row in indicators if row["indicator_type"] in {"domain", "url"}]
+    addresses = [row for row in indicators if row["indicator_type"] in {"ipv4", "ipv6"}]
+    hashes = [row for row in indicators if row["indicator_type"] in {"md5", "sha1", "sha256"}]
+    vulnerabilities = [row for row in indicators if row["indicator_type"] in {"cve", "ghsa"}]
+    packages = [row for row in indicators if row["indicator_type"] in {"package", "purl"}]
+    project_packages = load_project_security_packages()
+    selected: list[dict[str, Any]] = []
+    for group in (domains, addresses, hashes, vulnerabilities, packages):
+        if group:
+            selected.append(group[(sample_number - 1) % len(group)])
+    if project_packages:
+        selected.append(project_packages[(sample_number - 1) % len(project_packages)])
+
+    async def enrich_row(row: Mapping[str, Any]) -> dict[str, Any]:
+        if row["indicator_type"] in {"package", "purl"}:
+            return await intelligence.enrich_package(
+                row["value"],
+                force_refresh=force_refresh,
+            )
+        return await intelligence.enrich_indicator(
+            row["value"],
+            force_refresh=force_refresh,
         )
+
+    results = await asyncio.gather(
+        *(enrich_row(row) for row in selected),
+        return_exceptions=True,
+    )
+    evidence: list[dict[str, Any]] = []
+    capture_name = PCAP_API_READY_INDICATORS_PATH.name
+    for row, result in zip(selected, results):
+        is_package = row["indicator_type"] in {"package", "purl"}
+        provenance = dict(row)
+        if is_package:
+            provenance.setdefault("source_file", "project dependency inventory")
+            provenance.setdefault("evidence_scope", "deployed_platform_dependency")
+            field = "deployed platform dependency inventory"
+            applicable_sources = ["osv", "nvd"]
+        else:
+            provenance["capture_file"] = row.get("capture_file") or capture_name
+            provenance.setdefault("evidence_scope", "official_pcap_capture")
+            field = "pcap_api_ready_indicators.csv capture context"
+            applicable_sources = ["otx", "virustotal"]
+        if isinstance(result, Exception):
+            evidence.append({
+                "indicator": row["value"],
+                "type": row["indicator_type"],
+                "field": field,
+                "verdict": "unknown",
+                "confidence": 0.0,
+                "sources": {},
+                "coverage": {
+                    "applicable_sources": applicable_sources,
+                    "configured_sources": [],
+                    "available_sources": [],
+                    "queried_sources": [],
+                    "complete": False,
+                },
+                "message": str(result)[:240],
+                "provenance": provenance,
+            })
+        else:
+            evidence.append({
+                **result,
+                "field": field,
+                "provenance": provenance,
+            })
     return evidence
 
 
@@ -246,6 +545,8 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
     evidence_mode = "not_applicable"
     return {
         "log_id": row["sample_id"],
+        "report_type": "held_out_model_evaluation",
+        "report_type_label": "Held-out model evaluation",
         "investigation_id": row["sample_id"],
         "date": "Official TEST",
         "timestamp": "Replay",
@@ -271,7 +572,7 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "risk_score": round(risk_score, 2),
         "model_probability": round(confidence, 6),
         "predicted_class_confidence": round(confidence, 6),
-        "intel_verdict": "CTI not applicable — no per-row indicator supplied",
+        "intel_verdict": "Live contextual CTI enrichment pending",
         "tlp": tlp,
         "sharing_classification": tlp,
         "evaluation_mode": True,
@@ -281,9 +582,9 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "class_probabilities": row["probabilities"],
         "provider_evidence": provider_evidence,
         "indicator_evidence": indicator_evidence,
-        "evidence_mode": evidence_mode,
+        "evidence_mode": "pending_context",
         "live_evidence_checked_at": None,
-        "live_evidence_endpoint": None,
+        "live_evidence_endpoint": f"/api/evaluation-samples/{row['sample_id']}/live-evidence",
         "recommended_actions": evaluation_recommendations(row),
         "recommendation_method": "Model-only guidance for a held-out network-flow evaluation row.",
         "risk_reasons": [
@@ -292,7 +593,10 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
             "Correct prediction." if row["correct"] else "Incorrect prediction retained for transparent evaluation.",
             f"Attack probability P(non-Benign): {risk_score:.2f}% ({risk_level} severity).",
             f"Predicted-class confidence: {confidence:.2%}.",
-            "CTI was not queried because the dataset row has no attributable IoC, CVE, or package.",
+            (
+                "Opening this report queries PCAP network indicators through OTX/VirusTotal "
+                "and exact deployed dependencies through OSV/NVD."
+            ),
             "This unique row belongs only to the held-out CICIoMT2024 Official TEST split.",
         ],
         "model_details": {
@@ -477,6 +781,8 @@ def dashboard_log(event: Mapping[str, Any], result: Mapping[str, Any]) -> dict[s
     )
     log = {
         "log_id": f"AI-{now.strftime('%H%M%S')}-{random.randint(100, 999)}",
+        "report_type": "live_incident_investigation",
+        "report_type_label": "Live incident investigation",
         "date": now.strftime("%Y-%m-%d"),
         "timestamp": now.strftime("%H:%M:%S"),
         "category": "IoMT network flows",
@@ -494,6 +800,8 @@ def dashboard_log(event: Mapping[str, Any], result: Mapping[str, Any]) -> dict[s
         "attack_probability": result["attack_probability"],
         "model_probability": prediction["confidence"],
         "predicted_class_confidence": prediction["confidence"],
+        "features": prediction.get("features") or {},
+        "class_probabilities": prediction.get("probabilities") or {},
         "intel_verdict": intel_verdict,
         "tlp": sharing_classification,
         "sharing_classification": sharing_classification,
@@ -529,8 +837,198 @@ def analyze_and_record(payload: Mapping[str, Any]) -> tuple[dict[str, Any], dict
     return event, result, log
 
 
+async def enrich_pcap_references(
+    indicator_rows: list[Mapping[str, Any]],
+    cve_ids: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Enrich only references that are attributable to this capture/asset."""
+
+    ioc_tasks = [intelligence.enrich_indicator(str(row["value"])) for row in indicator_rows]
+    cve_tasks = [intelligence.enrich_indicator(cve_id) for cve_id in cve_ids]
+    ioc_results = await asyncio.gather(*ioc_tasks, return_exceptions=True) if ioc_tasks else []
+    cve_results = await asyncio.gather(*cve_tasks, return_exceptions=True) if cve_tasks else []
+
+    def normalize(results: list[Any], references: list[str]) -> list[dict[str, Any]]:
+        output: list[dict[str, Any]] = []
+        for reference, result in zip(references, results):
+            if isinstance(result, Exception):
+                output.append({
+                    "indicator": reference,
+                    "verdict": "error",
+                    "confidence": 0.0,
+                    "sources": {},
+                    "message": str(result)[:300],
+                })
+            else:
+                output.append(result)
+        return output
+
+    return (
+        normalize(ioc_results, [str(row["value"]) for row in indicator_rows]),
+        normalize(cve_results, cve_ids),
+    )
+
+
+def pcap_recommendations(
+    model_result: Mapping[str, Any],
+    intelligence_rows: list[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    actions: list[dict[str, str]] = []
+    malicious_iocs = [
+        str(row.get("indicator"))
+        for row in intelligence_rows
+        if row.get("verdict") == "malicious"
+    ]
+    vulnerable = [
+        str(row.get("indicator"))
+        for row in intelligence_rows
+        if row.get("verdict") == "vulnerable"
+    ]
+    if malicious_iocs:
+        actions.append({
+            "priority": "Immediate",
+            "action": "Block confirmed malicious public indicators in firewall, DNS, proxy, and EDR controls.",
+            "reason": f"Live CTI matched {len(malicious_iocs)} capture indicator(s).",
+        })
+    if vulnerable:
+        actions.append({
+            "priority": "High",
+            "action": "Patch or mitigate the confirmed CVE on the attributable asset, then verify the installed version.",
+            "reason": f"OSV/NVD confirmed {len(vulnerable)} supplied vulnerability reference(s).",
+        })
+    family = str(model_result.get("predicted_family") or "")
+    family_actions = {
+        "DDoS": "Enable upstream DDoS filtering and rate limiting.",
+        "DoS": "Rate-limit and isolate the suspected source while validating service availability.",
+        "MQTT": "Restrict broker access, rotate credentials, and enforce TLS/topic ACLs.",
+        "Recon": "Block the scanner and review adjacent firewall logs for targeted assets and ports.",
+        "Spoofing": "Inspect ARP tables, enable Dynamic ARP Inspection, and isolate the switch segment.",
+    }
+    if family in family_actions:
+        actions.append({
+            "priority": "High",
+            "action": family_actions[family],
+            "reason": f"CatBoost classified the supplied 12-feature row as {family}.",
+        })
+    actions.append({
+        "priority": "Review",
+        "action": "Preserve the original PCAP, its SHA-256, extraction result, and provider responses for analyst review.",
+        "reason": "Packet provenance and reproducibility are required for incident handling.",
+    })
+    return actions
+
+
+def analyze_pcap_file(
+    source: Path,
+    *,
+    display_name: str,
+    max_packets: int,
+    max_indicators: int,
+    feature_payload: Mapping[str, Any] | None,
+    cve_ids: list[str],
+) -> dict[str, Any]:
+    extracted = extract_pcap_indicators(source, max_packets=max_packets, max_flows=5_000)
+    selected_indicators = list(extracted["api_ready_indicators"])[:max_indicators]
+    ioc_evidence, vulnerability_evidence = runner.run(
+        enrich_pcap_references(selected_indicators, cve_ids),
+        timeout=max(90.0, 25.0 * (len(selected_indicators) + len(cve_ids))),
+    )
+
+    model_result: dict[str, Any]
+    if feature_payload is None:
+        model_result = {
+            "status": "not_run",
+            "reason": (
+                "The PCAP supplies packet evidence, but not the exact 12 aggregated flow features "
+                "required by the deployed CatBoost artifact. No model prediction was invented."
+            ),
+            "required_features": list(model_service.features),
+        }
+    else:
+        try:
+            prediction = model_service.predict(feature_payload)
+            model_result = {"status": "completed", **prediction}
+        except ValueError as exc:
+            model_result = {
+                "status": "not_run",
+                "reason": str(exc),
+                "required_features": list(model_service.features),
+            }
+
+    all_intelligence = [*ioc_evidence, *vulnerability_evidence]
+    cti_score = max(
+        (
+            float(row.get("confidence", 0.0) or 0.0)
+            for row in all_intelligence
+            if row.get("verdict") in {"malicious", "vulnerable"}
+        ),
+        default=0.0,
+    )
+    model_score = attack_probability(model_result) if model_result.get("status") == "completed" else 0.0
+    if model_result.get("status") == "completed":
+        risk_score = round(100.0 * (0.65 * model_score + 0.35 * cti_score), 2)
+    else:
+        risk_score = round(100.0 * cti_score, 2)
+    risk_level = (
+        "critical" if risk_score >= 80
+        else "high" if risk_score >= 60
+        else "medium" if risk_score >= 40
+        else "low" if risk_score > 0
+        else "info"
+    )
+
+    investigation_id = f"PCAP-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(3)}"
+    report = {
+        "investigation_id": investigation_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "capture_summary": {
+            "file_name": display_name,
+            "sha256": sha256_file(source),
+            "file_size": source.stat().st_size,
+            "packets_read": extracted["packets_read"],
+            "bytes_read": extracted["bytes_read"],
+            "truncated": extracted["truncated"],
+            "flow_count": extracted["flow_count"],
+            "indicator_count": len(extracted["indicators"]),
+            "public_indicator_count": len(extracted["api_ready_indicators"]),
+            "queried_indicator_count": len(selected_indicators),
+            "protocol_counts": extracted["protocol_counts"],
+        },
+        "model": model_result,
+        "pcap_evidence": {
+            "indicators": extracted["indicators"][:100],
+            "flows_preview": extracted["flows"][:25],
+            "query_limit": max_indicators,
+        },
+        "threat_intelligence": {
+            "iot_indicators": ioc_evidence,
+            "routing": "Public IP/domain/URL/hash references are sent only to OTX and VirusTotal.",
+        },
+        "asset_vulnerability": {
+            "supplied_cves": cve_ids,
+            "evidence": vulnerability_evidence,
+            "routing": (
+                "OSV and NVD are queried only for CVEs supplied as attributable asset metadata; "
+                "a CVE is never guessed from packet statistics."
+            ),
+        },
+        "risk": {
+            "score": risk_score,
+            "level": risk_level,
+            "model_component_available": model_result.get("status") == "completed",
+            "cti_component_available": bool(all_intelligence),
+        },
+    }
+    report["recommendations"] = pcap_recommendations(model_result, all_intelligence)
+    database.persist_pcap_investigation(report)
+    with PCAP_RESULT_PATH.open("a", encoding="utf-8") as output:
+        output.write(json.dumps(report, ensure_ascii=False, default=str) + "\n")
+    return report
+
+
 app = Flask(__name__, static_folder=str(DIST_DIR), static_url_path="")
 app.config["JSON_SORT_KEYS"] = False
+app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("MAX_PCAP_UPLOAD_MB", "256")) * 1024 * 1024
 
 IS_MANAGED_DEPLOYMENT = bool(os.getenv("RENDER"))
 required_auth_settings = ("ADMIN_EMAIL", "ADMIN_PASSWORD", "DEV_OTP_CODE", "FLASK_SECRET_KEY")
@@ -636,15 +1134,67 @@ def evaluation_sample_live_evidence(sample_id: str) -> Any:
     if row is None:
         return jsonify({"error": "Evaluation sample was not found."}), 404
 
-    return jsonify({
-        "error": (
-            "This evaluation row has no attributable IoC, CVE, or package. "
-            "The four APIs were not queried. Use the integration test or submit "
-            "a live event containing real indicators."
+    payload = request.get_json(silent=True) or {}
+    force_refresh = bool(payload.get("force_refresh", False))
+    connectivity = run_provider_connectivity_check(force_refresh=force_refresh)
+    checked_at = str(connectivity["checked_at"])
+
+    family = str(row.get("true_family") or "")
+    indicator_evidence = runner.run(
+        enrich_family_capture_context(
+            family,
+            int((row.get("event") or {}).get("sample_number_in_family") or 1),
+            force_refresh=force_refresh,
         ),
+        timeout=120,
+    )
+    if indicator_evidence:
+        states = intelligence.status()["sources"]
+        provider_evidence = summarize_provider_evidence(indicator_evidence, states)
+        for provider in provider_evidence:
+            state = states.get(provider["provider_id"]) or {}
+            provider["connection_status"] = str(state.get("status") or "unknown")
+            provider["connection_verified_at"] = state.get("last_success")
+            provider["connection_error"] = state.get("last_error")
+        all_four_available = all(
+            provider.get("queried")
+            and provider.get("available")
+            and provider.get("status") == "available"
+            for provider in provider_evidence
+        )
+
+        return jsonify({
+            "sample_id": sample_id,
+            "checked_at": checked_at,
+            "evidence_mode": "capture_and_dependency_context",
+            "all_four_connected": bool(connectivity["all_four_connected"]),
+            "all_four_available": all_four_available,
+            "provider_evidence": provider_evidence,
+            "indicator_evidence": indicator_evidence,
+            "message": (
+                "All four APIs returned evidence from real project data. AlienVault OTX "
+                "and VirusTotal queried public network indicators extracted from the "
+                "official PCAP capture. OSV queried an exact package version read from "
+                "requirements.txt or package-lock.json, and NVD queried only the real CVE "
+                "aliases returned by OSV. Network and dependency results are contextual "
+                "evidence and are not native columns of this numeric TEST row."
+            ),
+        })
+
+    return jsonify({
         "sample_id": sample_id,
+        "checked_at": checked_at,
+        "evidence_mode": "connectivity_only",
+        "all_four_connected": bool(connectivity["all_four_connected"]),
+        "all_four_available": bool(connectivity["all_four_connected"]),
         "provider_evidence": evaluation_provider_evidence(row),
-    }), 422
+        "indicator_evidence": [],
+        "message": (
+            "All four APIs were connection-checked. They were not used as evidence for "
+            "this row because the CICIoMT2024 feature export contains no attributable "
+            "IP, domain, hash, CVE, or package identifier."
+        ),
+    })
 
 
 @app.get("/api/intelligence/status")
@@ -656,8 +1206,7 @@ connectivity_check_cache: dict[str, Any] = {}
 connectivity_check_lock = threading.Lock()
 
 
-@app.post("/api/intelligence/connectivity-check")
-def intelligence_connectivity_check() -> Any:
+def run_provider_connectivity_check(*, force_refresh: bool) -> dict[str, Any]:
     """Verify provider reachability without attaching probe findings to a log.
 
     OTX and VirusTotal require an IoC-shaped request, while OSV and NVD require
@@ -666,13 +1215,11 @@ def intelligence_connectivity_check() -> Any:
     The result is cached to protect provider quotas when several reports open.
     """
 
-    payload = request.get_json(silent=True) or {}
-    force_refresh = bool(payload.get("force_refresh", False))
     now = time.monotonic()
     with connectivity_check_lock:
         cached_at = float(connectivity_check_cache.get("cached_at") or 0.0)
         if not force_refresh and now - cached_at < 600 and connectivity_check_cache.get("result"):
-            return jsonify(connectivity_check_cache["result"])
+            return dict(connectivity_check_cache["result"])
 
         async def check_sources() -> None:
             await asyncio.gather(
@@ -702,7 +1249,16 @@ def intelligence_connectivity_check() -> Any:
             "probe_results_attached_to_logs": False,
         }
         connectivity_check_cache.update({"cached_at": now, "result": result})
-        return jsonify(result)
+        return result
+
+
+@app.post("/api/intelligence/connectivity-check")
+def intelligence_connectivity_check() -> Any:
+    payload = request.get_json(silent=True) or {}
+    result = run_provider_connectivity_check(
+        force_refresh=bool(payload.get("force_refresh", False)),
+    )
+    return jsonify(result)
 
 
 @app.post("/api/intelligence/lookup")
@@ -763,6 +1319,105 @@ def alerts() -> Any:
 def investigations() -> Any:
     limit = min(max(int(request.args.get("limit", 100)), 1), 500)
     return jsonify({"investigations": database.list_dashboard_logs(limit), "storage": database.status()["backend"]})
+
+
+@app.get("/api/pcap/samples")
+def pcap_samples() -> Any:
+    samples = []
+    for sample_id, path in PCAP_SAMPLE_FILES.items():
+        if path.is_file():
+            samples.append({
+                "id": sample_id,
+                "label": sample_id.title(),
+                "file_name": path.name,
+                "file_size": path.stat().st_size,
+            })
+    return jsonify({"samples": samples})
+
+
+@app.get("/api/pcap/investigations")
+def pcap_investigations() -> Any:
+    limit = min(max(int(request.args.get("limit", 25)), 1), 100)
+    return jsonify({
+        "investigations": database.list_pcap_investigations(limit),
+        "storage": database.status()["backend"],
+    })
+
+
+@app.post("/api/pcap/analyze")
+def analyze_pcap_upload() -> Any:
+    """Analyze an uploaded capture or one curated local demonstration file."""
+
+    sample_id = str(request.form.get("sample_id") or "").strip().lower()
+    upload = request.files.get("pcap")
+    if not sample_id and (upload is None or not upload.filename):
+        return jsonify({"error": "Choose a project capture or upload a .pcap/.pcapng file."}), 422
+    if sample_id and sample_id not in PCAP_SAMPLE_FILES:
+        return jsonify({"error": "Unknown project capture."}), 422
+
+    try:
+        max_packets = min(max(int(request.form.get("max_packets", 50_000)), 100), 250_000)
+        max_indicators = min(max(int(request.form.get("max_indicators", 10)), 1), 20)
+    except ValueError:
+        return jsonify({"error": "Packet and indicator limits must be integers."}), 422
+
+    raw_features = str(request.form.get("features_json") or "").strip()
+    feature_payload = None
+    if raw_features:
+        try:
+            decoded = json.loads(raw_features)
+        except json.JSONDecodeError:
+            return jsonify({"error": "features_json must contain valid JSON."}), 422
+        if not isinstance(decoded, Mapping):
+            return jsonify({"error": "features_json must be a JSON object."}), 422
+        feature_payload = decoded
+
+    raw_cves = str(request.form.get("cve_ids") or "")
+    cve_ids = list(dict.fromkeys(
+        value.strip().upper()
+        for value in raw_cves.replace(";", ",").split(",")
+        if value.strip()
+    ))[:10]
+    invalid_cves = [value for value in cve_ids if not value.startswith("CVE-")]
+    if invalid_cves:
+        return jsonify({"error": f"Invalid CVE reference: {invalid_cves[0]}"}), 422
+
+    try:
+        if sample_id:
+            path = PCAP_SAMPLE_FILES[sample_id]
+            if not path.is_file():
+                return jsonify({"error": "The selected project capture is missing."}), 404
+            report = analyze_pcap_file(
+                path,
+                display_name=path.name,
+                max_packets=max_packets,
+                max_indicators=max_indicators,
+                feature_payload=feature_payload,
+                cve_ids=cve_ids,
+            )
+        else:
+            safe_name = secure_filename(str(upload.filename))
+            suffix = Path(safe_name).suffix.lower()
+            if suffix not in {".pcap", ".pcapng"}:
+                return jsonify({"error": "Only .pcap and .pcapng files are accepted."}), 422
+            with tempfile.TemporaryDirectory(prefix="cti-pcap-") as temp_dir:
+                path = Path(temp_dir) / safe_name
+                upload.save(path)
+                if not path.is_file() or path.stat().st_size == 0:
+                    return jsonify({"error": "The uploaded capture is empty."}), 422
+                report = analyze_pcap_file(
+                    path,
+                    display_name=safe_name,
+                    max_packets=max_packets,
+                    max_indicators=max_indicators,
+                    feature_payload=feature_payload,
+                    cve_ids=cve_ids,
+                )
+        return jsonify(report)
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        return jsonify({"error": str(exc)[:500]}), 422
+    except Exception as exc:
+        return jsonify({"error": f"PCAP investigation failed: {str(exc)[:400]}"}), 500
 
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@hospital.com").strip().lower()

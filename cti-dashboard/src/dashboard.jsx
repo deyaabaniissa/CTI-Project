@@ -40,7 +40,7 @@ const WS_URL =
   `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/live-logs`;
 // Bump when the report schema changes so stale per-row Log4Shell evidence is
 // not restored from a browser that visited an older build.
-const LOG_STORAGE_KEY = 'healthcare_soc_logs_v10';
+const LOG_STORAGE_KEY = 'healthcare_soc_logs_v13';
 const MAX_LOGS = 400;
 const EVALUATION_PAGE_SIZE = 25;
 const REPLAY_BATCH_SIZE = 1;
@@ -52,23 +52,6 @@ const PROVIDER_NAMES = {
   osv: 'OSV',
   nvd: 'NIST NVD',
 };
-const DEDICATED_REPORT_FIELDS = new Set([
-  'indicator_evidence',
-  'provider_evidence',
-  'recommended_actions',
-  'recommendation_method',
-  'risk_reasons',
-  'vulnerability_posture',
-  'features',
-  'class_probabilities',
-  'model_details',
-  'risk_probability',
-  'model_probability',
-  'tlp',
-  'date',
-  'timestamp',
-]);
-
 const CATEGORY_META = {
   'IoMT network flows': { label: 'IoMT network flows', icon: Radio, color: '#61b4d8' },
 };
@@ -116,9 +99,20 @@ const toFiniteNumber = (value, fallback = 0) => {
 const normalizeLog = (log) => {
   const severity = String(log.severity || log.risk_level || 'low').toLowerCase();
   const sharingClassification = String(log.sharing_classification || log.tlp || 'TLP:CLEAR');
+  const logId = String(log.log_id || `LOG-${Date.now()}`);
+  const evaluationMode = Boolean(
+    log.evaluation_mode
+    || log.report_type === 'held_out_model_evaluation'
+    || logId.startsWith('CIC24-TEST-'),
+  );
+  const liveEvidenceEndpoint = log.live_evidence_endpoint || (
+    evaluationMode ? `/api/evaluation-samples/${encodeURIComponent(logId)}/live-evidence` : null
+  );
   return {
     ...log,
-    log_id: String(log.log_id || `LOG-${Date.now()}`),
+    log_id: logId,
+    evaluation_mode: evaluationMode,
+    live_evidence_endpoint: liveEvidenceEndpoint,
     category: 'IoMT network flows',
     department: String(log.department || 'General'),
     destination_target: String(log.destination_target || '0.0.0.0'),
@@ -132,6 +126,8 @@ const normalizeLog = (log) => {
     attack_probability: toFiniteNumber(log.attack_probability ?? log.risk_probability),
     model_probability: toFiniteNumber(log.predicted_class_confidence ?? log.model_probability),
     predicted_class_confidence: toFiniteNumber(log.predicted_class_confidence ?? log.model_probability),
+    features: log.features || log.model_details?.features || {},
+    class_probabilities: log.class_probabilities || log.model_details?.probabilities || {},
     intel_verdict: String(log.intel_verdict || 'unknown'),
     tlp: sharingClassification,
     sharing_classification: sharingClassification,
@@ -211,6 +207,45 @@ const getLogThreatStatus = (log) => {
     return `Predicted ${predictedThreat ? 'Threat' : 'Safe'} — ${correctness}`;
   }
   return log.is_threat === 1 ? 'Threat' : 'Safe';
+};
+
+const getReportTypeLabel = (log) => (
+  log.report_type_label || (
+    log.evaluation_mode ? 'Held-out model evaluation' : 'Live incident investigation'
+  )
+);
+
+const getReportSummary = (log) => {
+  if (log.evaluation_mode) {
+    return [
+      ['Report type', getReportTypeLabel(log)],
+      ['Prediction outcome', getLogThreatStatus(log)],
+      ['Model-estimated risk', SEVERITY_META[log.severity]?.label || formatReportLabel(log.severity)],
+      ['Evaluation time', getReportTimeValue(log)],
+    ];
+  }
+  return [
+    ['Report type', getReportTypeLabel(log)],
+    ['Fused verdict', getLogThreatStatus(log)],
+    ['Incident risk', SEVERITY_META[log.severity]?.label || formatReportLabel(log.severity)],
+    ['Observed time', getReportTimeValue(log)],
+  ];
+};
+
+const getEvidenceMethodNote = (log) => {
+  if (!log.evaluation_mode) {
+    return 'Providers are queried only when this log contains a compatible indicator: OTX and VirusTotal for IP/domain/URL/hash values; OSV and NVD for CVE or vulnerability references.';
+  }
+  if (log.evidence_mode === 'capture_and_dependency_context') {
+    return 'OTX and VirusTotal query public indicators extracted from the official PCAP capture. OSV queries an exact package version from the deployed project dependency files, and NVD queries only CVE aliases returned by OSV. These are two clearly separated context planes; neither is presented as a native field of this numeric TEST row.';
+  }
+  if (log.evidence_mode === 'capture_context') {
+    return 'AlienVault OTX and VirusTotal results use public IoCs read from pcap_api_ready_indicators.csv. They are capture-level context, not fields stored in this exact numeric TEST row.';
+  }
+  if (log.evidence_mode === 'pending_context') {
+    return 'Live contextual enrichment is loading: OTX/VirusTotal will inspect official PCAP indicators, while OSV/NVD will inspect exact deployed dependency versions.';
+  }
+  return 'This held-out model row contains numeric flow features only. The statuses below verify that each API is reachable; no provider finding is attributed to this row because it has no IP, domain, URL, hash, CVE, or package identifier.';
 };
 
 const getReportTimeLabel = (log) => (log.evaluation_mode ? 'Replay Time' : 'Observed Time');
@@ -390,41 +425,32 @@ const buildProviderResultHtml = (provider) => {
 };
 
 const getReportRows = (log) => {
-  const preferredOrder = [
-    'log_id',
-    'category',
-    'traffic_class',
-    'department',
-    'source_ip',
-    'destination_target',
-    'data_mb',
-    'data_unit',
-    'is_threat',
-    'is_in_otx',
-    'severity',
-    'attack_probability',
-    'predicted_class_confidence',
-    'intel_verdict',
-    'sharing_classification',
-    'original_event_time',
+  const empty = 'Not applicable / not supplied';
+  const probability = `${(toFiniteNumber(log.attack_probability) * 100).toFixed(2)}%`;
+  const confidence = `${(toFiniteNumber(log.predicted_class_confidence) * 100).toFixed(2)}%`;
+  const predictionOutcome = log.evaluation_mode
+    ? (log.prediction_correct ? 'Correct' : 'Incorrect')
+    : 'Ground truth is not available for a live event';
+  return [
+    ['Report ID', log.log_id],
+    ['Report Type', getReportTypeLabel(log)],
+    ['Category', log.category],
+    ['Model Prediction', log.traffic_class || empty],
+    ['Ground Truth', log.evaluation_mode ? (log.true_family || empty) : empty],
+    ['Prediction Outcome', predictionOutcome],
+    ['Operational Context', log.department || empty],
+    ['Source IP', log.source_ip || empty],
+    ['Destination Target', log.destination_target || empty],
+    ['Data Volume', `${toFiniteNumber(log.data_mb)} ${log.data_unit || 'KB'}`],
+    ['Attack Probability P(non-Benign)', probability],
+    ['Predicted-Class Confidence', confidence],
+    ['CTI Verdict', log.intel_verdict || empty],
+    ['Sharing Classification', log.sharing_classification || log.tlp || empty],
+    ['Dataset', log.source_dataset || (log.evaluation_mode ? 'CICIoMT2024' : empty)],
+    ['Dataset Split', log.source_split || (log.evaluation_mode ? 'Official TEST' : empty)],
+    ['Source Record', log.source_row_number ?? empty],
+    [getReportTimeLabel(log), getReportTimeValue(log)],
   ];
-  const seen = new Set();
-  const rows = [];
-
-  preferredOrder.forEach((key) => {
-    if (Object.prototype.hasOwnProperty.call(log, key)) {
-      seen.add(key);
-      rows.push([formatReportLabel(key), log[key]]);
-    }
-  });
-
-  Object.entries(log).forEach(([key, value]) => {
-    if (!seen.has(key) && !DEDICATED_REPORT_FIELDS.has(key) && (value === null || typeof value !== 'object')) {
-      rows.push([formatReportLabel(key), value]);
-    }
-  });
-
-  return rows;
 };
 
 const getReportRecommendations = (log) => {
@@ -484,7 +510,6 @@ const downloadTextFile = (filename, content, type = 'text/html;charset=utf-8') =
 const buildReportHtml = (log) => {
   const tlpMeta = TLP_META[log.tlp] || TLP_META['TLP:CLEAR'];
   const severityMeta = SEVERITY_META[log.severity] || SEVERITY_META.low;
-  const status = getLogThreatStatus(log);
   const rows = getReportRows(log)
     .map(
       ([label, value]) =>
@@ -511,18 +536,19 @@ const buildReportHtml = (log) => {
   const reasons = (Array.isArray(log.risk_reasons) ? log.risk_reasons : [])
     .map((reason) => `<li>${escapeHtml(reason)}</li>`)
     .join('');
-  const posture = log.vulnerability_posture || {};
-  const postureSummary = `State ${posture.state || 'not recorded'}; ${toFiniteNumber(posture.packages_scanned)} packages scanned; ${toFiniteNumber(posture.vulnerability_count)} vulnerabilities; maximum CVSS ${toFiniteNumber(posture.max_cvss).toFixed(1)}.`;
   const featureRows = Object.entries(log.features || {})
     .map(([feature, value]) => `<tr><th>${escapeHtml(feature)}</th><td>${escapeHtml(value)}</td></tr>`)
     .join('');
   const probabilityRows = Object.entries(log.class_probabilities || {})
     .map(([family, value]) => `<tr><th>${escapeHtml(family)}</th><td>${escapeHtml(`${(toFiniteNumber(value) * 100).toFixed(2)}%`)}</td></tr>`)
     .join('');
-  const reportTitle = log.evaluation_mode ? 'Official TEST Evaluation Report' : 'Incident Report';
+  const reportTitle = 'Security Analysis Report';
   const reportDescription = log.evaluation_mode
-    ? 'Generated from a held-out CICIoMT2024 Official TEST row; this record was never used for training or balancing.'
-    : 'Generated from an analyzed IoMT network-flow event and its CTI evidence.';
+    ? 'Report type: held-out model evaluation. Ground truth is available; CTI combines official PCAP capture context with the deployed platform dependency posture.'
+    : 'Report type: live incident investigation. The model result is fused with evidence returned for indicators actually present in this event.';
+  const summaryRows = getReportSummary(log)
+    .map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`)
+    .join('');
 
   return `<!doctype html>
 <html lang="en">
@@ -581,22 +607,17 @@ const buildReportHtml = (log) => {
           <span class="badge" style="background:${tlpMeta.color}">${escapeHtml(log.sharing_classification || log.tlp)}</span>
         </div>
       </header>
-      <section class="summary" aria-label="Report summary">
-        <div><span>Status</span><strong>${escapeHtml(status)}</strong></div>
-        <div><span>Severity</span><strong>${escapeHtml(severityMeta.label)}</strong></div>
-        <div><span>Category</span><strong>${escapeHtml(log.category)}</strong></div>
-        <div><span>${escapeHtml(getReportTimeLabel(log))}</span><strong>${escapeHtml(getReportTimeValue(log))}</strong></div>
-      </section>
+      <section class="summary" aria-label="Report summary">${summaryRows}</section>
       <h2>Log Details</h2>
       <table><tbody>${rows}</tbody></table>
       ${featureRows ? `<h2>12 Model Features</h2><table><tbody>${featureRows}</tbody></table>` : ''}
       ${probabilityRows ? `<h2>Class Probabilities</h2><table><tbody>${probabilityRows}</tbody></table>` : ''}
       <h2>Threat-Intelligence Evidence</h2>
+      <p>${escapeHtml(getEvidenceMethodNote(log))}</p>
       <table class="provider-table">
-        <thead><tr><th>Provider</th><th>Query status</th><th>API result for this log</th></tr></thead>
+        <thead><tr><th>Provider</th><th>Provider status</th><th>Evidence result</th></tr></thead>
         <tbody>${providerRows}</tbody>
       </table>
-      <p><b>OSV/NVD dependency posture:</b> ${escapeHtml(postureSummary)}</p>
       ${reasons ? `<h2>Decision Reasons</h2><ul>${reasons}</ul>` : ''}
       <h2>Evidence-Linked Recommended Actions</h2>
       <p class="method-note">${escapeHtml(log.recommendation_method || 'Recommendations are local policy guidance; verify before operational action.')}</p>
@@ -1025,56 +1046,32 @@ export default function Dashboard({ onLogout }) {
     setFilters(DEFAULT_FILTERS);
   };
 
-  const checkApiConnections = async (log, forceRefresh = false) => {
-    setLiveEvidenceLoading(true);
-    setLiveEvidenceMessage('Verifying live connections to AlienVault OTX, VirusTotal, OSV, and NIST NVD...');
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/intelligence/connectivity-check`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force_refresh: forceRefresh }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || payload.detail || 'API connection check failed.');
-      setSourceStatus(payload.sources || {});
-      setSelectedReportLog((current) => (
-        current?.log_id === log.log_id
-          ? attachProviderConnections(current, payload.sources || {}, payload.checked_at)
-          : current
-      ));
-      setLiveEvidenceMessage(
-        payload.all_four_connected
-          ? 'All four APIs are connected. They were not used as evidence for this row because it contains no attributable indicator.'
-          : 'Connection check completed. At least one API is unavailable; see the provider status below.',
-      );
-    } catch (error) {
-      setLiveEvidenceMessage(error.message || 'API connection check failed.');
-    } finally {
-      setLiveEvidenceLoading(false);
-    }
-  };
-
   const handlePreviewReport = (log) => {
     const connectedLog = attachProviderConnections(log, sourceStatus);
     setSelectedReportLog(connectedLog);
     setLiveEvidenceMessage(
-      log.evidence_mode === 'live_api'
+      log.evidence_mode === 'capture_and_dependency_context'
         ? `Live API evidence checked at ${log.live_evidence_checked_at || 'the latest refresh'}.`
-        : log.evidence_mode === 'not_applicable'
-          ? 'Checking the four API connections. This evaluation row itself contains no attributable IoC, CVE, or package.'
-          : 'This report shows the evidence returned for indicators present in the event.',
+        : 'Loading real PCAP-indicator and deployed-dependency evidence from all four APIs...',
     );
     if (log.evaluation_mode) {
-      void checkApiConnections(connectedLog, false);
+      void refreshLiveEvidence(connectedLog, false);
     }
   };
 
   const refreshLiveEvidence = async (log, forceRefresh = true) => {
-    if (!log?.live_evidence_endpoint) return;
+    const endpoint = log?.live_evidence_endpoint || (
+      log?.evaluation_mode && log?.log_id
+        ? `/api/evaluation-samples/${encodeURIComponent(log.log_id)}/live-evidence`
+        : null
+    );
+    if (!endpoint) {
+      setLiveEvidenceMessage('This report has no live-evidence endpoint.');
+      return;
+    }
     setLiveEvidenceLoading(true);
     setLiveEvidenceMessage('Connecting to AlienVault OTX, VirusTotal, OSV, and NIST NVD...');
     try {
-      const endpoint = log.live_evidence_endpoint;
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1087,20 +1084,24 @@ export default function Dashboard({ onLogout }) {
         ...log,
         provider_evidence: payload.provider_evidence,
         indicator_evidence: payload.indicator_evidence,
-        evidence_mode: 'live_api',
+        evidence_mode: payload.evidence_mode || 'connectivity_only',
         live_evidence_checked_at: payload.checked_at,
-        intel_verdict: payload.all_four_available
-          ? 'live four-source API evidence returned'
-          : 'live API check completed with partial availability',
+        intel_verdict: payload.evidence_mode === 'capture_and_dependency_context'
+          ? 'live PCAP indicator and deployed dependency evidence returned by all four providers'
+          : payload.evidence_mode === 'capture_context'
+            ? 'capture-level IoC evidence returned by applicable providers'
+          : payload.all_four_connected
+            ? 'four-source connectivity verified; no row-level indicator supplied'
+            : 'API connectivity check completed with partial availability',
       });
       setSelectedReportLog(updated);
       setEvaluationSamples((current) => current.map((item) => (item.log_id === updated.log_id ? updated : item)));
       setStreamedEvaluationLogs((current) => current.map((item) => (item.log_id === updated.log_id ? updated : item)));
-      setLiveEvidenceMessage(
-        payload.all_four_available
-          ? 'Live connection verified: all four APIs returned an available response.'
-          : 'Live check completed. At least one provider is unavailable; see each provider row below.',
-      );
+      setLiveEvidenceMessage(payload.message || (
+        payload.all_four_connected
+          ? 'Live connection verified for all four APIs.'
+          : 'Live check completed. At least one provider is unavailable; see each provider row below.'
+      ));
     } catch (error) {
       setLiveEvidenceMessage(error.message || 'Live API refresh failed.');
     } finally {
@@ -1444,7 +1445,7 @@ export default function Dashboard({ onLogout }) {
                 </div>
               </div>
               <p className="dataset-note evaluation-note">
-                Each evaluation report includes the saved CatBoost prediction, model-derived risk, 12 features, and class probabilities. CTI providers are not queried because these exported flow rows contain no attributable IoC, CVE, or package. The replay does not insert duplicate incident records into the database.
+                Each evaluation report includes the saved CatBoost prediction, model-derived risk, 12 features, and class probabilities. Opening a report queries official PCAP indicators through OTX/VirusTotal and exact deployed dependency versions through OSV/NVD. These contextual evidence planes are kept separate from the numeric TEST row.
               </p>
             </>
           )}
@@ -1710,11 +1711,7 @@ export default function Dashboard({ onLogout }) {
           reportRef={reportRef}
           onClose={() => setSelectedReportLog(null)}
           onInstall={() => handleInstallReport(selectedReportLog)}
-          onRefreshLive={() => (
-            selectedReportLog.evaluation_mode
-              ? checkApiConnections(selectedReportLog, true)
-              : refreshLiveEvidence(selectedReportLog)
-          )}
+          onRefreshLive={() => refreshLiveEvidence(selectedReportLog, true)}
           liveEvidenceLoading={liveEvidenceLoading}
           liveEvidenceMessage={liveEvidenceMessage}
         />
@@ -1874,7 +1871,7 @@ function ReportModal({
         </div>
 
         {log.evaluation_mode && (
-          <p className={`report-live-status ${log.evidence_mode === 'live_api' ? 'is-live' : ''}`}>
+          <p className={`report-live-status ${log.evidence_mode !== 'not_applicable' ? 'is-live' : ''}`}>
             {liveEvidenceMessage}
           </p>
         )}
@@ -1918,11 +1915,9 @@ function ProviderResult({ provider }) {
 function ReportDocument({ log, reportRef }) {
   const tlpMeta = TLP_META[log.tlp] || TLP_META['TLP:CLEAR'];
   const severityMeta = SEVERITY_META[log.severity] || SEVERITY_META.low;
-  const status = getLogThreatStatus(log);
   const recommendations = getReportRecommendations(log);
   const providers = getProviderRows(log);
   const reasons = Array.isArray(log.risk_reasons) ? log.risk_reasons : [];
-  const posture = log.vulnerability_posture || {};
   const features = Object.entries(log.features || {});
   const probabilities = Object.entries(log.class_probabilities || {});
 
@@ -1931,11 +1926,11 @@ function ReportDocument({ log, reportRef }) {
       <header className="report-header">
         <div>
           <p>Healthcare CTI SOC</p>
-          <h1>{log.evaluation_mode ? 'Official TEST Evaluation Report' : 'Incident Report'}</h1>
+          <h1>Security Analysis Report</h1>
           <span>
             {log.evaluation_mode
-              ? 'Generated from a held-out CICIoMT2024 Official TEST row that was never used for training or balancing.'
-              : 'Generated from an analyzed IoMT network-flow event and its CTI evidence.'}
+              ? 'Report type: held-out model evaluation. Ground truth is available; CTI combines official PCAP capture context with the deployed platform dependency posture.'
+              : 'Report type: live incident investigation. The model result is fused with evidence returned for indicators actually present in this event.'}
           </span>
         </div>
         <div className="report-header-badges">
@@ -1945,22 +1940,12 @@ function ReportDocument({ log, reportRef }) {
       </header>
 
       <section className="report-summary-grid" aria-label="Report summary">
-        <div>
-          <span>Status</span>
-          <strong>{status}</strong>
-        </div>
-        <div>
-          <span>Severity</span>
-          <strong>{severityMeta.label}</strong>
-        </div>
-        <div>
-          <span>Category</span>
-          <strong>{log.category}</strong>
-        </div>
-        <div>
-          <span>{getReportTimeLabel(log)}</span>
-          <strong>{getReportTimeValue(log)}</strong>
-        </div>
+        {getReportSummary(log).map(([label, value]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
       </section>
 
       {features.length > 0 && (
@@ -2005,19 +1990,17 @@ function ReportDocument({ log, reportRef }) {
       </section>
 
       <section className="report-section">
-        <h2>{log.evaluation_mode ? 'API Connectivity (not per-log evidence)' : 'Threat-Intelligence Evidence'}</h2>
+        <h2>Threat-Intelligence Evidence</h2>
         <p className="report-method-note">
-          {log.evaluation_mode
-            ? 'This held-out model row contains numeric flow features only. The statuses below verify that each API is reachable; no provider result is attributed to this row because it has no IP, domain, URL, hash, CVE, or package identifier.'
-            : 'Providers are queried only when this log contains a compatible indicator: OTX and VirusTotal for IP/domain/URL/hash values; OSV and NVD for CVE or vulnerability references.'}
+          {getEvidenceMethodNote(log)}
         </p>
         <div className="report-table-wrap">
           <table className="report-provider-table">
             <thead>
               <tr>
                 <th>Provider</th>
-                <th>{log.evaluation_mode ? 'Connection status' : 'Query status'}</th>
-                <th>{log.evaluation_mode ? 'Why this row was not queried' : 'API result for this log'}</th>
+                <th>Provider status</th>
+                <th>Evidence result</th>
               </tr>
             </thead>
             <tbody>
@@ -2031,12 +2014,6 @@ function ReportDocument({ log, reportRef }) {
             </tbody>
           </table>
         </div>
-        <p className="report-posture-note">
-          <strong>OSV/NVD dependency posture:</strong>{' '}
-          State {posture.state || 'not recorded'}; {toFiniteNumber(posture.packages_scanned)} packages scanned;{' '}
-          {toFiniteNumber(posture.vulnerability_count)} vulnerabilities; maximum CVSS{' '}
-          {toFiniteNumber(posture.max_cvss).toFixed(1)}.
-        </p>
       </section>
 
       {reasons.length > 0 && (

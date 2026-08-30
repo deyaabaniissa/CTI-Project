@@ -237,6 +237,112 @@ class ThreatIntelligenceService:
             self._cache[cache_key] = (time.time() + self.cache_ttl, result)
             return result
 
+    async def enrich_package(
+        self,
+        package_identifier: str,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        """Query OSV for a package/PURL and enrich returned CVEs with NVD."""
+
+        identifier = str(package_identifier or "").strip()
+        if not identifier:
+            raise ValueError("Package identifier is empty.")
+        cache_key = f"package:{identifier.lower()}"
+        cached = self._cache.get(cache_key)
+        if not force_refresh and cached and cached[0] > time.time():
+            return {**cached[1], "cached": True}
+
+        lock = self._indicator_locks.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            cached = self._cache.get(cache_key)
+            if not force_refresh and cached and cached[0] > time.time():
+                return {**cached[1], "cached": True}
+
+            started = time.perf_counter()
+            try:
+                if identifier.lower().startswith("pkg:"):
+                    query = {"package": {"purl": identifier}}
+                else:
+                    parts = identifier.split(":", 2)
+                    if len(parts) != 3 or not all(parts):
+                        raise ValueError(
+                            "Package identifiers must be a PURL or ecosystem:name:version."
+                        )
+                    ecosystem, name, version = parts
+                    query = {
+                        "version": version,
+                        "package": {"ecosystem": ecosystem, "name": name},
+                    }
+                response = await request_json(
+                    "POST",
+                    f"{OSV_API_BASE}/query",
+                    body=query,
+                    timeout=30,
+                )
+                vulnerabilities = list(response.get("vulns") or [])
+                aliases = list(dict.fromkeys(
+                    str(alias).upper()
+                    for vulnerability in vulnerabilities
+                    for alias in vulnerability.get("aliases") or []
+                    if isinstance(alias, str)
+                ))
+                cve_ids = [alias for alias in aliases if CVE_PATTERN.fullmatch(alias)][:100]
+                osv_payload = {
+                    "available": True,
+                    "found": bool(vulnerabilities),
+                    "id": (vulnerabilities[0].get("id") if vulnerabilities else identifier),
+                    "aliases": aliases,
+                    "summary": (
+                        vulnerabilities[0].get("summary")
+                        if vulnerabilities
+                        else "No OSV vulnerability matched this package."
+                    ),
+                    "affected_packages": len(vulnerabilities),
+                }
+                self._record("osv", started)
+            except Exception as exc:
+                self._record("osv", started, exc)
+                osv_payload = _error_payload(exc)
+                vulnerabilities = []
+                cve_ids = []
+
+            try:
+                nvd_records = await self._lookup_nvd(cve_ids) if cve_ids else []
+                nvd_payload = {
+                    "available": True,
+                    "found": bool(nvd_records),
+                    "records": nvd_records,
+                }
+            except Exception as exc:
+                nvd_records = []
+                nvd_payload = {**_error_payload(exc), "records": []}
+
+            available_sources = [
+                source
+                for source, payload in {"osv": osv_payload, "nvd": nvd_payload}.items()
+                if payload.get("available")
+            ]
+            found = bool(vulnerabilities or nvd_records)
+            result = {
+                "indicator": identifier,
+                "type": "package",
+                "verdict": "vulnerable" if found else ("not_found" if available_sources else "unknown"),
+                "confidence": 0.9 if found and len(available_sources) == 2 else (0.65 if found else 0.0),
+                "sources": {"osv": osv_payload, "nvd": nvd_payload},
+                "coverage": {
+                    "applicable_sources": ["osv", "nvd"],
+                    "configured_sources": ["osv", "nvd"],
+                    "available_sources": available_sources,
+                    "queried_sources": ["osv", "nvd"],
+                    "complete": len(available_sources) == 2,
+                },
+                "message": None if found else "The package was not confirmed vulnerable by OSV/NVD.",
+                "cached": False,
+            }
+            self._cache[cache_key] = (time.time() + self.cache_ttl, result)
+            return result
+
     async def _enrich_uncached(self, indicator: str, indicator_type: str) -> dict[str, Any]:
         """Route a normalized reference only to databases that understand it."""
 

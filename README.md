@@ -118,6 +118,29 @@ The four providers are routed by indicator type; an irrelevant source is not des
 
 The WebSocket streams newly persisted investigations. It does not capture packets directly from a network interface. Production packet ingestion would require a flow extractor that produces the same 12-feature schema before calling the API.
 
+## PCAP role and CTI extraction
+
+The official CSV feature tables were already produced from the original PCAP captures. CatBoost is therefore trained on the 12 numeric flow features, not on raw packet bytes. Re-training directly on PCAP would first require reproducing the dataset's complete flow-extraction window and aggregation logic; feeding packets directly to CatBoost would change the schema and invalidate the saved evaluation.
+
+PCAP remains valuable as the evidence plane. The project now includes a streaming extractor that keeps indicators attributable to their capture and flow:
+
+```powershell
+.\.venv\Scripts\python.exe extract_pcap_indicators.py `
+  "CIC dataset\WiFi_and_MQTT\attacks\PCAP\test\ARP_Spoofing_test.pcap" `
+  --output data\pcap\arp_spoofing_indicators.json
+```
+
+The JSON separates:
+
+- all observed local/public IPs, DNS domains, and clear-text HTTP URLs;
+- `api_ready_indicators`, which contains only public IoCs suitable for OTX/VirusTotal;
+- per-flow provenance so an indicator is never copied onto unrelated evaluation rows;
+- routing guidance explaining that NVD/OSV require a CVE or package/version from an asset inventory rather than a numeric flow feature.
+
+Private RFC1918 addresses remain in the local audit record but are never sent to external providers. TLS-encrypted hostnames may not be visible unless the capture exposes DNS or other unencrypted metadata.
+
+The authenticated dashboard now includes a **PCAP Investigation** workspace. An analyst can upload a `.pcap`/`.pcapng` file or choose one of six local CICIoMT2024 test captures. Flask extracts packet evidence, queries at most 10 public IoCs by default, keeps OSV/NVD limited to explicitly supplied CVEs, calculates an evidence score, generates response recommendations, and stores the complete report in the `pcap_investigations` table. CatBoost runs only when the analyst also supplies a valid JSON object containing all 12 model features; otherwise the report explicitly records `model: not_run`.
+
 ## Install and run locally
 
 Install Python and frontend dependencies:
@@ -154,6 +177,9 @@ All routes except health and administrator authentication require an authenticat
 
 - `POST /api/predict` or `POST /api/analyze`: classify one 12-feature flow and enrich supported indicators in the same event.
 - `POST /api/integration-sample/run`: execute the labeled model-plus-CTI integration fixture.
+- `GET /api/pcap/samples`: list the six curated local class captures available to the PCAP workspace.
+- `POST /api/pcap/analyze`: upload/select a capture, extract attributable evidence, run applicable live CTI queries, and persist the report.
+- `GET /api/pcap/investigations`: return stored PCAP investigation reports from SQLite/PostgreSQL/Supabase.
 - `POST /api/intelligence/lookup`: query one supported public indicator.
 - `GET /api/intelligence/status`: report provider configuration and availability without exposing keys.
 - `GET /api/model`: return CatBoost type, features, classes, metrics, balance audit, and feature importance.

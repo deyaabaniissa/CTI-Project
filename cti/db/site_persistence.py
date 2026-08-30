@@ -26,6 +26,7 @@ from cti.db.models import (
     ModelEvaluationSample,
     ModelPrediction,
     ModelVersion,
+    PcapInvestigation,
     ProviderName,
     Severity,
 )
@@ -103,6 +104,7 @@ class SitePersistenceService:
                     "model_evaluation_samples": ModelEvaluationSample,
                     "cti_lookup_results": CTILookupResult,
                     "alerts": Alert,
+                    "pcap_investigations": PcapInvestigation,
                 }.items():
                     counts[name] = int(session.scalar(select(func.count()).select_from(model)) or 0)
         return {
@@ -176,6 +178,52 @@ class SitePersistenceService:
                     updated += 1
             session.commit()
         return {"inserted": inserted, "updated": updated, "deleted": deleted, "total": len(rows)}
+
+    def persist_pcap_investigation(self, report: Mapping[str, Any]) -> str:
+        """Persist one complete PCAP report without inventing a model event."""
+
+        factory = get_session_factory()
+        capture = report.get("capture_summary") or {}
+        model = report.get("model") or {}
+        risk = report.get("risk") or {}
+        investigation_key = str(report["investigation_id"])
+        with factory() as session:
+            row = session.scalar(
+                select(PcapInvestigation).where(
+                    PcapInvestigation.investigation_key == investigation_key
+                )
+            )
+            if row is None:
+                row = PcapInvestigation(
+                    investigation_key=investigation_key,
+                    file_name=str(capture.get("file_name") or "capture.pcap")[:512],
+                    file_sha256=str(capture.get("sha256") or "")[:64],
+                    file_size=int(capture.get("file_size", 0) or 0),
+                    packets_read=int(capture.get("packets_read", 0) or 0),
+                    flow_count=int(capture.get("flow_count", 0) or 0),
+                    indicator_count=int(capture.get("indicator_count", 0) or 0),
+                    public_indicator_count=int(capture.get("public_indicator_count", 0) or 0),
+                    model_status=str(model.get("status") or "not_run")[:64],
+                    predicted_family=(str(model.get("predicted_family"))[:64] if model.get("predicted_family") else None),
+                    risk_score=float(risk.get("score", 0.0) or 0.0),
+                    risk_level=severity(str(risk.get("level") or "info")),
+                    report_payload=json_safe(report),
+                )
+                session.add(row)
+            else:
+                row.report_payload = json_safe(report)
+            session.commit()
+        return investigation_key
+
+    def list_pcap_investigations(self, limit: int = 50) -> list[dict[str, Any]]:
+        factory = get_session_factory()
+        with factory() as session:
+            rows = session.scalars(
+                select(PcapInvestigation)
+                .order_by(PcapInvestigation.created_at.desc())
+                .limit(limit)
+            ).all()
+            return [json_safe(row.report_payload) for row in rows]
 
     @staticmethod
     def _get_or_create_asset(session, event: Mapping[str, Any]) -> Asset | None:
