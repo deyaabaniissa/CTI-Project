@@ -150,9 +150,170 @@ class PcapApiTests(unittest.TestCase):
 
         scopes = {item["provenance"]["evidence_scope"] for item in evidence}
         self.assertEqual(scopes, {"official_pcap_capture", "deployed_platform_dependency"})
+        self.assertTrue(all(item["provenance"]["attributable_to_log"] is False for item in evidence))
         package = next(item for item in evidence if item["type"] == "package")
         self.assertEqual(package["indicator"], "PyPI:Flask:3.1.2")
         self.assertEqual(package["coverage"]["queried_sources"], ["osv", "nvd"])
+
+    def test_false_positive_evaluation_never_recommends_containment(self) -> None:
+        actions = flask_app.evaluation_recommendations(
+            {
+                "true_family": "Benign",
+                "predicted_family": "Spoofing",
+                "correct": False,
+                "confidence": 0.495,
+                "risk_level": "medium",
+            }
+        )
+
+        combined_actions = " ".join(item["action"] for item in actions).lower()
+        self.assertIn("false-positive", combined_actions)
+        self.assertIn("do not initiate containment", combined_actions)
+        self.assertNotIn("isolate the suspected", combined_actions)
+        self.assertNotIn("temporary source blocking", combined_actions)
+
+    def test_correct_benign_evaluation_has_no_incident_response_action(self) -> None:
+        actions = flask_app.evaluation_recommendations(
+            {
+                "true_family": "Benign",
+                "predicted_family": "Benign",
+                "correct": True,
+                "confidence": 0.99,
+                "risk_level": "low",
+            }
+        )
+
+        self.assertIn("No incident-response containment", actions[0]["action"])
+
+    def test_evaluation_live_evidence_always_bypasses_cache(self) -> None:
+        replay_row = flask_app.load_official_test_replay()[0]
+        connectivity = {
+            "checked_at": "2026-08-30T00:00:00+00:00",
+            "all_four_connected": True,
+        }
+        live_result = {
+            "indicator": "example.com",
+            "type": "domain",
+            "verdict": "clean",
+            "confidence": 0.0,
+            "sources": {},
+            "coverage": {
+                "applicable_sources": ["otx", "virustotal"],
+                "configured_sources": [],
+                "available_sources": [],
+                "queried_sources": [],
+                "complete": False,
+            },
+            "provenance": {
+                "evidence_scope": "official_pcap_capture",
+                "attributable_to_log": False,
+            },
+        }
+        with (
+            patch.object(
+                flask_app,
+                "run_provider_connectivity_check",
+                return_value=connectivity,
+            ) as connectivity_check,
+            patch.object(
+                flask_app,
+                "enrich_family_capture_context",
+                new=AsyncMock(return_value=[live_result]),
+            ) as enrich_context,
+        ):
+            response = self.client.post(
+                f"/api/evaluation-samples/{replay_row['sample_id']}/live-evidence",
+                json={"force_refresh": False},
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        payload = response.get_json()
+        self.assertTrue(payload["live_query"])
+        self.assertFalse(payload["cache_used"])
+        connectivity_check.assert_called_once_with(force_refresh=True)
+        self.assertTrue(enrich_context.await_args.kwargs["force_refresh"])
+
+    def test_persisted_report_live_evidence_is_fresh_and_not_saved(self) -> None:
+        investigation_id = "report-live-123"
+        stored_log = {
+            "investigation_id": investigation_id,
+            "source_ip": "8.8.8.8",
+            "destination_target": "example.com",
+            "features": {},
+            "indicator_evidence": [],
+        }
+        states = {
+            provider: {
+                "configured": True,
+                "status": "live",
+                "last_success": "2026-08-30T00:00:00+00:00",
+                "last_error": None,
+            }
+            for provider in ("otx", "virustotal", "osv", "nvd")
+        }
+        with (
+            patch.object(
+                flask_app.database,
+                "list_dashboard_logs",
+                return_value=[stored_log],
+            ),
+            patch.object(
+                flask_app,
+                "enrich_event",
+                new=AsyncMock(return_value=[]),
+            ) as enrich_event,
+            patch.object(
+                flask_app.intelligence,
+                "status",
+                return_value={"sources": states},
+            ),
+        ):
+            response = self.client.post(
+                f"/api/investigations/{investigation_id}/live-evidence",
+                json={"force_refresh": False},
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        payload = response.get_json()
+        self.assertTrue(payload["live_query"])
+        self.assertFalse(payload["cache_used"])
+        self.assertEqual(payload["evidence_mode"], "connectivity_only")
+        self.assertTrue(enrich_event.await_args.kwargs["force_refresh"])
+
+    def test_context_only_cti_does_not_change_model_probability(self) -> None:
+        result = flask_app.live_fused_risk(
+            {"attack_probability": 0.5657},
+            [{
+                "verdict": "malicious",
+                "confidence": 1.0,
+                "provenance": {"attributable_to_log": False},
+            }],
+        )
+
+        self.assertFalse(result["applied"])
+        self.assertEqual(result["score"], 56.57)
+        self.assertEqual(result["cti_score"], 0.0)
+        self.assertIn("context-only evidence", result["reason"])
+        self.assertIn("56.57%", result["reason"])
+
+    def test_attributable_live_cti_updates_fused_risk(self) -> None:
+        result = flask_app.live_fused_risk(
+            {
+                "attack_probability": 0.50,
+                "asset_criticality": 0.80,
+            },
+            [{
+                "verdict": "malicious",
+                "confidence": 0.80,
+                "provenance": {"attributable_to_log": True},
+            }],
+        )
+
+        self.assertTrue(result["applied"])
+        self.assertEqual(result["score"], 62.0)
+        self.assertEqual(result["level"], "high")
+        self.assertEqual(result["cti_score"], 0.8)
+        self.assertIn("Live fused risk: 62.00%", result["reason"])
 
 
 if __name__ == "__main__":

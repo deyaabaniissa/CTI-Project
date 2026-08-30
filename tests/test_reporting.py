@@ -73,6 +73,42 @@ class ProviderReportTests(unittest.TestCase):
         self.assertEqual(actions[0]["evidence_sources"], ["AlienVault OTX", "VirusTotal"])
         self.assertIn("IT", actions[0]["problem"])
 
+    def test_contextual_dependency_finding_is_not_attributed_to_log(self):
+        rows = summarize_provider_evidence(
+            [
+                {
+                    "indicator": "npm:nanoid:3.3.16",
+                    "type": "package",
+                    "provenance": {
+                        "evidence_scope": "deployed_platform_dependency",
+                        "attributable_to_log": False,
+                        "source_file": "cti-dashboard/package-lock.json",
+                    },
+                    "coverage": {
+                        "applicable_sources": ["osv", "nvd"],
+                        "queried_sources": ["osv", "nvd"],
+                        "available_sources": ["osv", "nvd"],
+                    },
+                    "sources": {
+                        "osv": {"available": True, "found": True, "id": "GHSA-example"},
+                        "nvd": {
+                            "available": True,
+                            "records": [{"cve_id": "CVE-2026-0001", "cvss": 8.2, "severity": "HIGH"}],
+                        },
+                    },
+                }
+            ],
+            STATES,
+        )
+        for provider_id in ("osv", "nvd"):
+            provider = next(row for row in rows if row["provider_id"] == provider_id)
+            self.assertTrue(provider["context_only"])
+            self.assertFalse(provider["observations"][0]["attributable_to_log"])
+            self.assertEqual(
+                provider["observations"][0]["evidence_scope"],
+                "deployed_platform_dependency",
+            )
+
     def test_nvd_required_action_is_preserved(self):
         provider_rows = summarize_provider_evidence(
             [

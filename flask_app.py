@@ -130,6 +130,75 @@ def attack_probability(prediction: Mapping[str, Any]) -> float:
     return min(max(1.0 - benign_probability, 0.0), 1.0)
 
 
+def live_fused_risk(
+    log: Mapping[str, Any],
+    evidence: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Fuse only API evidence attributable to the exact live event.
+
+    CatBoost P(non-Benign) remains an immutable model output. Capture-wide and
+    dependency-context findings are excluded so they cannot change a held-out
+    TEST row's score.
+    """
+
+    model_attack_score = min(
+        max(float(log.get("attack_probability") or 0.0), 0.0),
+        1.0,
+    )
+    attributable = [
+        item
+        for item in evidence
+        if (item.get("provenance") or {}).get("attributable_to_log", True) is not False
+    ]
+    adverse = [
+        item
+        for item in attributable
+        if str(item.get("verdict") or "").lower() in {"malicious", "vulnerable"}
+    ]
+    cti_score = max(
+        (float(item.get("confidence") or 0.0) for item in adverse),
+        default=0.0,
+    )
+
+    if not attributable:
+        score = round(100.0 * model_attack_score, 2)
+        level = "critical" if score >= 80 else "high" if score >= 60 else "medium" if score >= 40 else "low"
+        return {
+            "score": score,
+            "level": level,
+            "cti_score": 0.0,
+            "applied": False,
+            "reason": (
+                "Live CTI returned context-only evidence, so it was not fused into this "
+                f"row. CatBoost P(non-Benign) remains {model_attack_score:.2%}."
+            ),
+        }
+
+    asset_criticality = min(
+        max(float(log.get("asset_criticality") or 0.8), 0.0),
+        1.0,
+    )
+    score = round(
+        100.0 * (
+            0.60 * model_attack_score
+            + 0.25 * cti_score
+            + 0.15 * asset_criticality
+        ),
+        2,
+    )
+    level = "critical" if score >= 80 else "high" if score >= 60 else "medium" if score >= 40 else "low"
+    return {
+        "score": score,
+        "level": level,
+        "cti_score": round(cti_score, 6),
+        "applied": True,
+        "reason": (
+            f"Live fused risk: {score:.2f}% ({level}), using CatBoost P(non-Benign) "
+            f"{model_attack_score:.2%} and attributable live CTI score {cti_score:.2%}."
+        ),
+    }
+
+
 @lru_cache(maxsize=1)
 def load_official_test_replay() -> tuple[dict[str, Any], ...]:
     if not OFFICIAL_TEST_REPLAY_PATH.is_file():
@@ -211,25 +280,81 @@ def load_official_test_replay() -> tuple[dict[str, Any], ...]:
 
 
 def evaluation_recommendations(row: Mapping[str, Any]) -> list[dict[str, Any]]:
-    risk_level = str(row.get("risk_level") or "low")
-    priority = "Critical" if risk_level == "critical" else "High" if risk_level == "high" else "Review"
-    family = str(row.get("predicted_family") or "Benign")
-    family_actions = {
-        "DDoS": "Enable upstream DDoS filtering, rate limiting, and temporary source blocking.",
-        "DoS": "Apply rate limiting, isolate the source, and validate service capacity and availability.",
-        "MQTT": "Restrict MQTT broker access, rotate credentials, and enforce TLS and topic ACLs.",
-        "Recon": "Review adjacent firewall logs for targeted ports and assets, then block confirmed scanners.",
-        "Spoofing": "Inspect ARP tables, enable Dynamic ARP Inspection, and isolate the suspected switch segment.",
-    }
-    actions = []
-    if family in family_actions:
-        actions.append({
-            "priority": priority,
-            "action": family_actions[family],
-            "problem": f"CatBoost classified the held-out network flow as {family}.",
-            "evidence_sources": ["CICIoMT2024 CatBoost"],
-            "evidence": "Model-only evaluation; this row does not contain an IoC, CVE, or package identifier.",
-        })
+    predicted_family = str(row.get("predicted_family") or "Benign")
+    true_family = str(row.get("true_family") or "Unknown")
+    correct = bool(row.get("correct"))
+    confidence = float(row.get("confidence") or 0.0)
+
+    if not correct and true_family == "Benign":
+        primary_action = {
+            "priority": "Review",
+            "action": (
+                "Review this false-positive prediction against the Benign and "
+                f"{predicted_family} feature distributions. Do not initiate containment "
+                "from this held-out evaluation row."
+            ),
+            "problem": (
+                f"The official TEST label is Benign, but CatBoost predicted {predicted_family}."
+            ),
+            "evidence_sources": ["CICIoMT2024 Official TEST", "CICIoMT2024 CatBoost"],
+            "evidence": (
+                f"Ground truth Benign; predicted {predicted_family}; "
+                f"predicted-class confidence {confidence:.2%}. Contextual CTI is not attributable "
+                "to this numeric TEST row."
+            ),
+        }
+    elif not correct and predicted_family == "Benign":
+        primary_action = {
+            "priority": "Review",
+            "action": (
+                "Review this false-negative miss, inspect the class threshold and feature values, "
+                "and add the row to model error analysis. This TEST row is not a live incident."
+            ),
+            "problem": f"The official TEST label is {true_family}, but CatBoost predicted Benign.",
+            "evidence_sources": ["CICIoMT2024 Official TEST", "CICIoMT2024 CatBoost"],
+            "evidence": (
+                f"Ground truth {true_family}; predicted Benign; predicted-class confidence "
+                f"{confidence:.2%}."
+            ),
+        }
+    elif not correct:
+        primary_action = {
+            "priority": "Review",
+            "action": (
+                f"Review the class confusion between {true_family} and {predicted_family}. "
+                "Do not execute incident-response containment from a held-out TEST row."
+            ),
+            "problem": (
+                f"The official TEST label is {true_family}, but CatBoost predicted "
+                f"{predicted_family}."
+            ),
+            "evidence_sources": ["CICIoMT2024 Official TEST", "CICIoMT2024 CatBoost"],
+            "evidence": f"Incorrect family prediction with {confidence:.2%} predicted-class confidence.",
+        }
+    elif true_family == "Benign":
+        primary_action = {
+            "priority": "Validation",
+            "action": (
+                "Record this correctly classified Benign row as validation evidence. "
+                "No incident-response containment is recommended."
+            ),
+            "problem": "No model error was observed for this held-out Benign row.",
+            "evidence_sources": ["CICIoMT2024 Official TEST", "CICIoMT2024 CatBoost"],
+            "evidence": f"Correct Benign prediction with {confidence:.2%} confidence.",
+        }
+    else:
+        primary_action = {
+            "priority": "Validation",
+            "action": (
+                f"Record this correctly classified {true_family} row as model-validation evidence. "
+                "Operational containment requires a separate live event with attributable indicators."
+            ),
+            "problem": f"CatBoost correctly classified the held-out row as {true_family}.",
+            "evidence_sources": ["CICIoMT2024 Official TEST", "CICIoMT2024 CatBoost"],
+            "evidence": f"Correct {true_family} prediction with {confidence:.2%} confidence.",
+        }
+
+    actions = [primary_action]
     actions.append(
         {
             "priority": "Review",
@@ -380,6 +505,7 @@ def load_family_capture_indicators(family: str) -> tuple[dict[str, Any], ...]:
                 "packet_numbers": parsed_list(item.get("packet_numbers")),
                 "flow_keys": parsed_list(item.get("flow_keys")),
                 "capture_file": PCAP_API_READY_INDICATORS_PATH.name,
+                "attributable_to_log": False,
             })
     return tuple(rows)
 
@@ -414,6 +540,7 @@ def load_project_security_packages() -> tuple[dict[str, Any], ...]:
                 "ecosystem": "PyPI",
                 "source_file": "requirements.txt",
                 "evidence_scope": "deployed_platform_dependency",
+                "attributable_to_log": False,
             }
 
     package_lock_path = PROJECT_ROOT / "cti-dashboard" / "package-lock.json"
@@ -440,6 +567,7 @@ def load_project_security_packages() -> tuple[dict[str, Any], ...]:
                 "ecosystem": "npm",
                 "source_file": "cti-dashboard/package-lock.json",
                 "evidence_scope": "deployed_platform_dependency",
+                "attributable_to_log": False,
             }
 
     return tuple(
@@ -492,6 +620,11 @@ async def enrich_family_capture_context(
     for row, result in zip(selected, results):
         is_package = row["indicator_type"] in {"package", "purl"}
         provenance = dict(row)
+        # Capture-wide IoCs and deployed dependency findings are real project
+        # evidence, but neither is a native field of this numeric TEST row.
+        # Preserve that boundary so the report cannot label a Benign row as
+        # malicious merely because the wider capture or platform has a finding.
+        provenance["attributable_to_log"] = False
         if is_package:
             provenance.setdefault("source_file", "project dependency inventory")
             provenance.setdefault("evidence_scope", "deployed_platform_dependency")
@@ -586,12 +719,15 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "live_evidence_checked_at": None,
         "live_evidence_endpoint": f"/api/evaluation-samples/{row['sample_id']}/live-evidence",
         "recommended_actions": evaluation_recommendations(row),
-        "recommendation_method": "Model-only guidance for a held-out network-flow evaluation row.",
+        "recommendation_method": (
+            "Evaluation-only guidance: ground truth is known. Do not execute operational "
+            "containment from this held-out TEST row or from contextual CTI alone."
+        ),
         "risk_reasons": [
             f"Ground truth: {row['true_family']}.",
             f"CatBoost prediction: {predicted_family} ({confidence:.1%}).",
             "Correct prediction." if row["correct"] else "Incorrect prediction retained for transparent evaluation.",
-            f"Attack probability P(non-Benign): {risk_score:.2f}% ({risk_level} severity).",
+            f"CatBoost attack probability P(non-Benign): {risk_score:.2f}% ({risk_level} model score).",
             f"Predicted-class confidence: {confidence:.2%}.",
             (
                 "Opening this report queries PCAP network indicators through OTX/VirusTotal "
@@ -814,6 +950,9 @@ def dashboard_log(event: Mapping[str, Any], result: Mapping[str, Any]) -> dict[s
         ],
         "model_details": prediction,
         "investigation_id": result["investigation_id"],
+        "live_evidence_endpoint": (
+            f"/api/investigations/{result['investigation_id']}/live-evidence"
+        ),
         "evaluation_mode": False,
         "observed_time": str(event.get("observed_time") or event.get("timestamp") or now.isoformat()),
     }
@@ -1134,8 +1273,9 @@ def evaluation_sample_live_evidence(sample_id: str) -> Any:
     if row is None:
         return jsonify({"error": "Evaluation sample was not found."}), 404
 
-    payload = request.get_json(silent=True) or {}
-    force_refresh = bool(payload.get("force_refresh", False))
+    # A report refresh is deliberately live. Do not reuse the in-memory CTI
+    # cache or the evidence snapshot previously rendered for this sample.
+    force_refresh = True
     connectivity = run_provider_connectivity_check(force_refresh=force_refresh)
     checked_at = str(connectivity["checked_at"])
 
@@ -1156,12 +1296,14 @@ def evaluation_sample_live_evidence(sample_id: str) -> Any:
             provider["connection_status"] = str(state.get("status") or "unknown")
             provider["connection_verified_at"] = state.get("last_success")
             provider["connection_error"] = state.get("last_error")
+            provider["lookup_mode"] = "live_api"
         all_four_available = all(
             provider.get("queried")
             and provider.get("available")
             and provider.get("status") == "available"
             for provider in provider_evidence
         )
+        fused_risk = live_fused_risk(evaluation_dashboard_log(row), indicator_evidence)
 
         return jsonify({
             "sample_id": sample_id,
@@ -1171,16 +1313,26 @@ def evaluation_sample_live_evidence(sample_id: str) -> Any:
             "all_four_available": all_four_available,
             "provider_evidence": provider_evidence,
             "indicator_evidence": indicator_evidence,
+            "live_query": True,
+            "cache_used": False,
+            "live_fused_risk": fused_risk["score"],
+            "live_risk_level": fused_risk["level"],
+            "live_cti_score": fused_risk["cti_score"],
+            "risk_adjustment_applied": fused_risk["applied"],
+            "live_risk_reason": fused_risk["reason"],
             "message": (
-                "All four APIs returned evidence from real project data. AlienVault OTX "
+                f"Fresh live queries completed at {checked_at} without reusing saved report evidence. "
+                "AlienVault OTX "
                 "and VirusTotal queried public network indicators extracted from the "
                 "official PCAP capture. OSV queried an exact package version read from "
                 "requirements.txt or package-lock.json, and NVD queried only the real CVE "
                 "aliases returned by OSV. Network and dependency results are contextual "
-                "evidence and are not native columns of this numeric TEST row."
+                "evidence, are not native columns of this numeric TEST row, and do not "
+                "change its CatBoost prediction or model-estimated risk."
             ),
         })
 
+    fused_risk = live_fused_risk(evaluation_dashboard_log(row), [])
     return jsonify({
         "sample_id": sample_id,
         "checked_at": checked_at,
@@ -1189,10 +1341,92 @@ def evaluation_sample_live_evidence(sample_id: str) -> Any:
         "all_four_available": bool(connectivity["all_four_connected"]),
         "provider_evidence": evaluation_provider_evidence(row),
         "indicator_evidence": [],
+        "live_query": True,
+        "cache_used": False,
+        "live_fused_risk": fused_risk["score"],
+        "live_risk_level": fused_risk["level"],
+        "live_cti_score": fused_risk["cti_score"],
+        "risk_adjustment_applied": fused_risk["applied"],
+        "live_risk_reason": fused_risk["reason"],
         "message": (
             "All four APIs were connection-checked. They were not used as evidence for "
             "this row because the CICIoMT2024 feature export contains no attributable "
             "IP, domain, hash, CVE, or package identifier."
+        ),
+    })
+
+
+@app.post("/api/investigations/<investigation_id>/live-evidence")
+def investigation_live_evidence(investigation_id: str) -> Any:
+    """Refresh CTI for one persisted report without storing the new response.
+
+    The stored dashboard snapshot supplies only indicators that belonged to the
+    original investigation.  Provider responses are fetched live and returned
+    to the open report, but are not written back to PostgreSQL/SQLite.
+    """
+
+    log = next(
+        (
+            item
+            for item in database.list_dashboard_logs(500)
+            if str(item.get("investigation_id") or "") == investigation_id
+        ),
+        None,
+    )
+    if log is None:
+        return jsonify({"error": "Investigation was not found."}), 404
+
+    indicators = list(dict.fromkeys(
+        str(item.get("indicator") or "").strip()
+        for item in (log.get("indicator_evidence") or [])
+        if str(item.get("indicator") or "").strip()
+    ))
+    event: dict[str, Any] = {
+        **dict(log.get("features") or {}),
+        "source_ip": log.get("source_ip"),
+        "destination_ip": log.get("destination_target"),
+        "indicators": indicators,
+    }
+    checked_at = datetime.now(timezone.utc).isoformat()
+    evidence = runner.run(
+        enrich_event(event, force_refresh=True),
+        timeout=120,
+    )
+    states = intelligence.status()["sources"]
+    provider_evidence = summarize_provider_evidence(evidence, states)
+    for provider in provider_evidence:
+        state = states.get(provider["provider_id"]) or {}
+        provider["connection_status"] = str(state.get("status") or "unknown")
+        provider["connection_verified_at"] = state.get("last_success")
+        provider["connection_error"] = state.get("last_error")
+        provider["lookup_mode"] = "live_api"
+    fused_risk = live_fused_risk(log, evidence)
+
+    return jsonify({
+        "investigation_id": investigation_id,
+        "checked_at": checked_at,
+        "evidence_mode": "event_attributed_live" if evidence else "connectivity_only",
+        "all_four_connected": all(
+            str((states.get(provider) or {}).get("status")) == "live"
+            for provider in ("otx", "virustotal", "osv", "nvd")
+        ),
+        "provider_evidence": provider_evidence,
+        "indicator_evidence": evidence,
+        "live_query": True,
+        "cache_used": False,
+        "live_fused_risk": fused_risk["score"],
+        "live_risk_level": fused_risk["level"],
+        "live_cti_score": fused_risk["cti_score"],
+        "risk_adjustment_applied": fused_risk["applied"],
+        "live_risk_reason": fused_risk["reason"],
+        "message": (
+            f"Fresh live provider queries completed at {checked_at} for this report's own indicators; "
+            "the returned evidence was not loaded from or written back to the stored report."
+            if evidence
+            else (
+                f"Fresh connectivity check completed at {checked_at}, but this report has no "
+                "compatible public indicator."
+            )
         ),
     })
 

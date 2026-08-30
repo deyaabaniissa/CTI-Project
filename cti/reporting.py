@@ -158,9 +158,24 @@ def summarize_provider_evidence(
             row["available"] = bool(row["available"] or provider in available)
             payload = sources.get(provider)
             if isinstance(payload, Mapping):
-                row["observations"].append(_observation(provider, evidence, payload))
+                observation = _observation(provider, evidence, payload)
+                provenance = evidence.get("provenance") or {}
+                observation["evidence_scope"] = str(
+                    provenance.get("evidence_scope") or "event_indicator"
+                )
+                observation["attributable_to_log"] = bool(
+                    provenance.get("attributable_to_log", True)
+                )
+                observation["source_file"] = provenance.get("source_file") or provenance.get(
+                    "capture_file"
+                )
+                row["observations"].append(observation)
 
     for row in rows.values():
+        row["context_only"] = bool(row["observations"]) and all(
+            observation.get("attributable_to_log") is False
+            for observation in row["observations"]
+        )
         if not row["applicable"]:
             continue
         if not row["configured"]:
