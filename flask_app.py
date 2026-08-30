@@ -705,7 +705,7 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "risk_score": round(risk_score, 2),
         "model_probability": round(confidence, 6),
         "predicted_class_confidence": round(confidence, 6),
-        "intel_verdict": "Live contextual CTI enrichment pending",
+        "intel_verdict": "CTI not applicable — this TEST row has no attributable indicator",
         "tlp": tlp,
         "sharing_classification": tlp,
         "evaluation_mode": True,
@@ -715,7 +715,7 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "class_probabilities": row["probabilities"],
         "provider_evidence": provider_evidence,
         "indicator_evidence": indicator_evidence,
-        "evidence_mode": "pending_context",
+        "evidence_mode": evidence_mode,
         "live_evidence_checked_at": None,
         "live_evidence_endpoint": f"/api/evaluation-samples/{row['sample_id']}/live-evidence",
         "recommended_actions": evaluation_recommendations(row),
@@ -730,8 +730,9 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
             f"CatBoost attack probability P(non-Benign): {risk_score:.2f}% ({risk_level} model score).",
             f"Predicted-class confidence: {confidence:.2%}.",
             (
-                "Opening this report queries PCAP network indicators through OTX/VirusTotal "
-                "and exact deployed dependencies through OSV/NVD."
+                "Opening this report verifies live API connectivity only. Provider findings "
+                "are not requested because this numeric TEST row contains no attributable "
+                "IP, domain, hash, CVE, or package identifier."
             ),
             "This unique row belongs only to the held-out CICIoMT2024 Official TEST split.",
         ],
@@ -1279,59 +1280,6 @@ def evaluation_sample_live_evidence(sample_id: str) -> Any:
     connectivity = run_provider_connectivity_check(force_refresh=force_refresh)
     checked_at = str(connectivity["checked_at"])
 
-    family = str(row.get("true_family") or "")
-    indicator_evidence = runner.run(
-        enrich_family_capture_context(
-            family,
-            int((row.get("event") or {}).get("sample_number_in_family") or 1),
-            force_refresh=force_refresh,
-        ),
-        timeout=120,
-    )
-    if indicator_evidence:
-        states = intelligence.status()["sources"]
-        provider_evidence = summarize_provider_evidence(indicator_evidence, states)
-        for provider in provider_evidence:
-            state = states.get(provider["provider_id"]) or {}
-            provider["connection_status"] = str(state.get("status") or "unknown")
-            provider["connection_verified_at"] = state.get("last_success")
-            provider["connection_error"] = state.get("last_error")
-            provider["lookup_mode"] = "live_api"
-        all_four_available = all(
-            provider.get("queried")
-            and provider.get("available")
-            and provider.get("status") == "available"
-            for provider in provider_evidence
-        )
-        fused_risk = live_fused_risk(evaluation_dashboard_log(row), indicator_evidence)
-
-        return jsonify({
-            "sample_id": sample_id,
-            "checked_at": checked_at,
-            "evidence_mode": "capture_and_dependency_context",
-            "all_four_connected": bool(connectivity["all_four_connected"]),
-            "all_four_available": all_four_available,
-            "provider_evidence": provider_evidence,
-            "indicator_evidence": indicator_evidence,
-            "live_query": True,
-            "cache_used": False,
-            "live_fused_risk": fused_risk["score"],
-            "live_risk_level": fused_risk["level"],
-            "live_cti_score": fused_risk["cti_score"],
-            "risk_adjustment_applied": fused_risk["applied"],
-            "live_risk_reason": fused_risk["reason"],
-            "message": (
-                f"Fresh live queries completed at {checked_at} without reusing saved report evidence. "
-                "AlienVault OTX "
-                "and VirusTotal queried public network indicators extracted from the "
-                "official PCAP capture. OSV queried an exact package version read from "
-                "requirements.txt or package-lock.json, and NVD queried only the real CVE "
-                "aliases returned by OSV. Network and dependency results are contextual "
-                "evidence, are not native columns of this numeric TEST row, and do not "
-                "change its CatBoost prediction or model-estimated risk."
-            ),
-        })
-
     fused_risk = live_fused_risk(evaluation_dashboard_log(row), [])
     return jsonify({
         "sample_id": sample_id,
@@ -1341,7 +1289,9 @@ def evaluation_sample_live_evidence(sample_id: str) -> Any:
         "all_four_available": bool(connectivity["all_four_connected"]),
         "provider_evidence": evaluation_provider_evidence(row),
         "indicator_evidence": [],
-        "live_query": True,
+        "live_query": False,
+        "connectivity_check": True,
+        "provider_findings_used_as_evidence": False,
         "cache_used": False,
         "live_fused_risk": fused_risk["score"],
         "live_risk_level": fused_risk["level"],
@@ -1349,9 +1299,9 @@ def evaluation_sample_live_evidence(sample_id: str) -> Any:
         "risk_adjustment_applied": fused_risk["applied"],
         "live_risk_reason": fused_risk["reason"],
         "message": (
-            "All four APIs were connection-checked. They were not used as evidence for "
-            "this row because the CICIoMT2024 feature export contains no attributable "
-            "IP, domain, hash, CVE, or package identifier."
+            f"Live API connectivity was checked at {checked_at}. No indicator was sent for "
+            "security enrichment because this CICIoMT2024 TEST row contains numeric model "
+            "features only and has no attributable IP, domain, hash, CVE, or package identifier."
         ),
     })
 
@@ -1380,6 +1330,7 @@ def investigation_live_evidence(investigation_id: str) -> Any:
         str(item.get("indicator") or "").strip()
         for item in (log.get("indicator_evidence") or [])
         if str(item.get("indicator") or "").strip()
+        and (item.get("provenance") or {}).get("attributable_to_log", True) is not False
     ))
     event: dict[str, Any] = {
         **dict(log.get("features") or {}),

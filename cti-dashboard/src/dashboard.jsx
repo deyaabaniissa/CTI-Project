@@ -1113,7 +1113,9 @@ export default function Dashboard({ onLogout }) {
     setSelectedReportLog(freshReportLog);
     setLiveEvidenceMessage(
       freshReportLog.live_evidence_endpoint
-        ? 'Running fresh live queries for this report. Saved API evidence is not being reused...'
+        ? freshReportLog.evaluation_mode
+          ? 'Checking live connectivity to all four APIs. No TEST-row finding will be claimed without an attributable indicator...'
+          : 'Running fresh live queries for this report. Saved API evidence is not being reused...'
         : 'This report has no live-evidence endpoint.',
     );
     if (freshReportLog.live_evidence_endpoint) {
@@ -1132,7 +1134,11 @@ export default function Dashboard({ onLogout }) {
       return;
     }
     setLiveEvidenceLoading(true);
-    setLiveEvidenceMessage('Connecting to AlienVault OTX, VirusTotal, OSV, and NIST NVD...');
+    setLiveEvidenceMessage(
+      log.evaluation_mode
+        ? 'Verifying live connectivity to AlienVault OTX, VirusTotal, OSV, and NIST NVD...'
+        : 'Querying this event\'s own indicators through AlienVault OTX, VirusTotal, OSV, and NIST NVD...',
+    );
     try {
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
@@ -1944,7 +1950,7 @@ function ReportModal({
                 {liveEvidenceLoading
                   ? 'Connecting...'
                   : log.evaluation_mode
-                    ? 'Run live API lookup'
+                    ? 'Verify API connectivity'
                     : 'Refresh all APIs live'}
               </button>
             )}

@@ -76,14 +76,18 @@ class PcapApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
 
-    def test_evaluation_context_uses_real_network_and_dependency_inputs(self) -> None:
+    def test_evaluation_rows_do_not_claim_capture_or_dependency_context(self) -> None:
         replay_row = flask_app.load_official_test_replay()[0]
         dashboard_log = flask_app.evaluation_dashboard_log(replay_row)
         self.assertEqual(
             dashboard_log["live_evidence_endpoint"],
             f"/api/evaluation-samples/{replay_row['sample_id']}/live-evidence",
         )
-        self.assertEqual(dashboard_log["evidence_mode"], "pending_context")
+        self.assertEqual(dashboard_log["evidence_mode"], "not_applicable")
+        self.assertEqual(dashboard_log["indicator_evidence"], [])
+        self.assertIn("no attributable indicator", dashboard_log["intel_verdict"])
+
+    def test_context_catalog_remains_separate_from_evaluation_rows(self) -> None:
 
         packages = flask_app.load_project_security_packages()
         self.assertEqual(
@@ -191,24 +195,6 @@ class PcapApiTests(unittest.TestCase):
             "checked_at": "2026-08-30T00:00:00+00:00",
             "all_four_connected": True,
         }
-        live_result = {
-            "indicator": "example.com",
-            "type": "domain",
-            "verdict": "clean",
-            "confidence": 0.0,
-            "sources": {},
-            "coverage": {
-                "applicable_sources": ["otx", "virustotal"],
-                "configured_sources": [],
-                "available_sources": [],
-                "queried_sources": [],
-                "complete": False,
-            },
-            "provenance": {
-                "evidence_scope": "official_pcap_capture",
-                "attributable_to_log": False,
-            },
-        }
         with (
             patch.object(
                 flask_app,
@@ -218,7 +204,7 @@ class PcapApiTests(unittest.TestCase):
             patch.object(
                 flask_app,
                 "enrich_family_capture_context",
-                new=AsyncMock(return_value=[live_result]),
+                new=AsyncMock(return_value=[]),
             ) as enrich_context,
         ):
             response = self.client.post(
@@ -228,10 +214,15 @@ class PcapApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         payload = response.get_json()
-        self.assertTrue(payload["live_query"])
+        self.assertFalse(payload["live_query"])
+        self.assertTrue(payload["connectivity_check"])
+        self.assertFalse(payload["provider_findings_used_as_evidence"])
         self.assertFalse(payload["cache_used"])
+        self.assertEqual(payload["evidence_mode"], "connectivity_only")
+        self.assertEqual(payload["indicator_evidence"], [])
+        self.assertFalse(payload["risk_adjustment_applied"])
         connectivity_check.assert_called_once_with(force_refresh=True)
-        self.assertTrue(enrich_context.await_args.kwargs["force_refresh"])
+        enrich_context.assert_not_awaited()
 
     def test_persisted_report_live_evidence_is_fresh_and_not_saved(self) -> None:
         investigation_id = "report-live-123"
@@ -240,7 +231,10 @@ class PcapApiTests(unittest.TestCase):
             "source_ip": "8.8.8.8",
             "destination_target": "example.com",
             "features": {},
-            "indicator_evidence": [],
+            "indicator_evidence": [{
+                "indicator": "context.example",
+                "provenance": {"attributable_to_log": False},
+            }],
         }
         states = {
             provider: {
@@ -279,6 +273,8 @@ class PcapApiTests(unittest.TestCase):
         self.assertFalse(payload["cache_used"])
         self.assertEqual(payload["evidence_mode"], "connectivity_only")
         self.assertTrue(enrich_event.await_args.kwargs["force_refresh"])
+        queried_event = enrich_event.await_args.args[0]
+        self.assertNotIn("context.example", queried_event["indicators"])
 
     def test_context_only_cti_does_not_change_model_probability(self) -> None:
         result = flask_app.live_fused_risk(
