@@ -472,6 +472,8 @@ const getReportRows = (log) => {
   const predictionOutcome = log.evaluation_mode
     ? (log.prediction_correct ? 'Correct' : 'Incorrect')
     : 'Ground truth is not available for a live event';
+  const networkContext = log.api_context?.network;
+  const dependencyContext = log.api_context?.dependency;
   return [
     ['Report ID', log.log_id],
     ['Report Type', getReportTypeLabel(log)],
@@ -502,6 +504,15 @@ const getReportRows = (log) => {
     ['Dataset', log.source_dataset || (log.evaluation_mode ? 'CICIoMT2024' : empty)],
     ['Dataset Split', log.source_split || (log.evaluation_mode ? 'Official TEST' : empty)],
     ['Source Record', log.source_row_number ?? empty],
+    ...(networkContext?.indicator
+      ? [['OTX / VirusTotal Query', `${networkContext.indicator_type}: ${networkContext.indicator}`]]
+      : []),
+    ...(dependencyContext?.identifier
+      ? [['OSV / NVD Query', dependencyContext.identifier]]
+      : []),
+    ...(networkContext?.indicator || dependencyContext?.identifier
+      ? [['API Context Scope', 'Real project context; not a native field of this numeric TEST row']]
+      : []),
     [getReportTimeLabel(log), getReportTimeValue(log)],
   ];
 };
@@ -672,7 +683,7 @@ const buildReportHtml = (log) => {
         <tbody>${providerRows}</tbody>
       </table>
       ${reasons ? `<h2>Decision Reasons</h2><ul>${reasons}</ul>` : ''}
-      <h2>Evidence-Linked Recommended Actions</h2>
+      <h2>${escapeHtml(log.evaluation_mode ? 'Model Evaluation and Response Guidance' : 'Evidence-Linked Recommended Actions')}</h2>
       <p class="method-note">${escapeHtml(log.recommendation_method || 'Recommendations are local policy guidance; verify before operational action.')}</p>
       <ul class="recommendations">${recommendations}</ul>
     </main>
@@ -1114,7 +1125,7 @@ export default function Dashboard({ onLogout }) {
     setLiveEvidenceMessage(
       freshReportLog.live_evidence_endpoint
         ? freshReportLog.evaluation_mode
-          ? 'Checking live connectivity to all four APIs. No TEST-row finding will be claimed without an attributable indicator...'
+          ? 'Querying all four APIs with the real PCAP and dependency context attached to this TEST sample...'
           : 'Running fresh live queries for this report. Saved API evidence is not being reused...'
         : 'This report has no live-evidence endpoint.',
     );
@@ -1136,7 +1147,7 @@ export default function Dashboard({ onLogout }) {
     setLiveEvidenceLoading(true);
     setLiveEvidenceMessage(
       log.evaluation_mode
-        ? 'Verifying live connectivity to AlienVault OTX, VirusTotal, OSV, and NIST NVD...'
+        ? 'Querying AlienVault OTX and VirusTotal with PCAP context, then OSV and NIST NVD with dependency context...'
         : 'Querying this event\'s own indicators through AlienVault OTX, VirusTotal, OSV, and NIST NVD...',
     );
     try {
@@ -1954,7 +1965,7 @@ function ReportModal({
                 {liveEvidenceLoading
                   ? 'Connecting...'
                   : log.evaluation_mode
-                    ? 'Verify API connectivity'
+                    ? 'Query all 4 APIs live'
                     : 'Refresh all APIs live'}
               </button>
             )}
@@ -2126,7 +2137,7 @@ function ReportDocument({ log, reportRef }) {
       )}
 
       <section className="report-section">
-        <h2>Evidence-Linked Recommended Actions</h2>
+        <h2>{log.evaluation_mode ? 'Model Evaluation and Response Guidance' : 'Evidence-Linked Recommended Actions'}</h2>
         <p className="report-method-note">
           {log.recommendation_method || 'Recommendations are local policy guidance; verify before operational action.'}
         </p>

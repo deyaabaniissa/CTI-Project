@@ -76,16 +76,19 @@ class PcapApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
 
-    def test_evaluation_rows_do_not_claim_capture_or_dependency_context(self) -> None:
+    def test_evaluation_rows_expose_separate_non_attributable_api_context(self) -> None:
         replay_row = flask_app.load_official_test_replay()[0]
         dashboard_log = flask_app.evaluation_dashboard_log(replay_row)
         self.assertEqual(
             dashboard_log["live_evidence_endpoint"],
             f"/api/evaluation-samples/{replay_row['sample_id']}/live-evidence",
         )
-        self.assertEqual(dashboard_log["evidence_mode"], "not_applicable")
+        self.assertEqual(dashboard_log["evidence_mode"], "pending_context")
         self.assertEqual(dashboard_log["indicator_evidence"], [])
-        self.assertIn("no attributable indicator", dashboard_log["intel_verdict"])
+        self.assertIn("not attributable", dashboard_log["intel_verdict"])
+        self.assertFalse(replay_row["api_context"]["attributable_to_numeric_test_row"])
+        self.assertTrue(replay_row["api_context"]["network"]["indicator"])
+        self.assertTrue(replay_row["api_context"]["dependency"]["identifier"])
 
     def test_context_catalog_remains_separate_from_evaluation_rows(self) -> None:
 
@@ -203,8 +206,25 @@ class PcapApiTests(unittest.TestCase):
             ) as connectivity_check,
             patch.object(
                 flask_app,
-                "enrich_family_capture_context",
-                new=AsyncMock(return_value=[]),
+                "enrich_evaluation_api_context",
+                new=AsyncMock(return_value=[{
+                    "indicator": "example.com",
+                    "type": "domain",
+                    "verdict": "not_found",
+                    "confidence": 0.0,
+                    "sources": {},
+                    "coverage": {
+                        "applicable_sources": ["otx", "virustotal"],
+                        "configured_sources": ["otx", "virustotal"],
+                        "available_sources": [],
+                        "queried_sources": ["otx", "virustotal"],
+                        "complete": False,
+                    },
+                    "provenance": {
+                        "attributable_to_log": False,
+                        "evidence_scope": "official_pcap_capture",
+                    },
+                }]),
             ) as enrich_context,
         ):
             response = self.client.post(
@@ -214,15 +234,15 @@ class PcapApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         payload = response.get_json()
-        self.assertFalse(payload["live_query"])
+        self.assertTrue(payload["live_query"])
         self.assertTrue(payload["connectivity_check"])
         self.assertFalse(payload["provider_findings_used_as_evidence"])
         self.assertFalse(payload["cache_used"])
-        self.assertEqual(payload["evidence_mode"], "connectivity_only")
-        self.assertEqual(payload["indicator_evidence"], [])
+        self.assertEqual(payload["evidence_mode"], "capture_and_dependency_context")
+        self.assertEqual(len(payload["indicator_evidence"]), 1)
         self.assertFalse(payload["risk_adjustment_applied"])
         connectivity_check.assert_called_once_with(force_refresh=True)
-        enrich_context.assert_not_awaited()
+        enrich_context.assert_awaited_once_with(replay_row, force_refresh=True)
 
     def test_persisted_report_live_evidence_is_fresh_and_not_saved(self) -> None:
         investigation_id = "report-live-123"

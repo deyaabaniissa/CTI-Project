@@ -1,0 +1,7 @@
+,Benign,DDoS,DoS,MQTT,Recon,Spoofing
+Benign,41,0,0,1,1,7
+DDoS,0,50,0,0,0,0
+DoS,0,0,50,0,0,0
+MQTT,0,0,0,49,1,0
+Recon,1,0,0,0,47,2
+Spoofing,1,0,0,0,8,41

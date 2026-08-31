@@ -232,11 +232,14 @@ def load_official_test_replay() -> tuple[dict[str, Any], ...]:
             family: float((prediction.get("probabilities") or {}).get(family, 0.0))
             for family in model_service.classes
         }
+        api_context = event.get("api_context")
+        if api_context is not None and not isinstance(api_context, Mapping):
+            raise ValueError("An official evaluation result has invalid API context data.")
         # The official CICIoMT2024 TEST rows contain flow features only.  The
-        # generated evaluation artifact also carries one public Log4Shell
-        # fixture so the four CTI clients can be integration-tested.  That
-        # fixture is identical on all 300 rows and is not evidence about an
-        # individual flow.  Never expose or query it from per-row reports.
+        # optional api_context is a separately sourced, explicitly
+        # non-attributable demonstration plane.  It makes all four live clients
+        # testable without pretending that an IoC or dependency was a native
+        # column of this exact numeric row.
         evaluation_event = {
             **features,
             "ground_truth_family": true_family,
@@ -244,6 +247,8 @@ def load_official_test_replay() -> tuple[dict[str, Any], ...]:
             "sample_position": int(event["sample_position"]),
             "sample_origin": str(event.get("sample_origin") or "CICIoMT2024 Official TEST"),
         }
+        if api_context:
+            evaluation_event["api_context"] = dict(api_context)
         model_attack_score = attack_probability(prediction)
         risk_score = round(100.0 * model_attack_score, 2)
         risk_level = (
@@ -266,6 +271,7 @@ def load_official_test_replay() -> tuple[dict[str, Any], ...]:
             "probabilities": probabilities,
             "features": features,
             "event": evaluation_event,
+            "api_context": dict(api_context) if api_context else None,
             "cti_summary": [],
             "observables": {},
             "risk_score": risk_score,
@@ -360,6 +366,53 @@ def evaluation_recommendations(row: Mapping[str, Any]) -> list[dict[str, Any]]:
         }
 
     actions = [primary_action]
+    family_playbooks = {
+        "DDoS": (
+            "If a live event reproduces this DDoS pattern, enable upstream DDoS mitigation, "
+            "apply protocol-aware rate limits, preserve source/flow indicators, and coordinate "
+            "with the ISP or scrubbing provider before blocking broad address ranges.",
+            "A distributed flood can exhaust bandwidth, connection tables, or the targeted IoMT service.",
+        ),
+        "DoS": (
+            "If a live event reproduces this DoS pattern, isolate the affected service, apply "
+            "per-source connection and request limits, capture the source IP and five-tuple, "
+            "and verify recovery after the traffic is contained.",
+            "A concentrated denial-of-service flow can exhaust one device or service endpoint.",
+        ),
+        "MQTT": (
+            "If confirmed on live MQTT traffic, restrict broker access with ACLs, require TLS, "
+            "rotate exposed credentials, cap client connection/publish rates, and preserve the "
+            "client ID and broker address for investigation.",
+            "Abusive or malformed MQTT traffic can disrupt broker availability and IoMT messaging.",
+        ),
+        "Recon": (
+            "If confirmed in live traffic, identify and preserve the scanning source, restrict "
+            "unnecessary ports at the segment boundary, review the targeted services, and "
+            "increase monitoring for follow-on exploitation attempts.",
+            "Reconnaissance can reveal reachable services and precede exploitation.",
+        ),
+        "Spoofing": (
+            "If confirmed in live traffic, validate the IP-to-MAC mapping, isolate the suspect "
+            "switch port, enable DHCP snooping and Dynamic ARP Inspection where supported, "
+            "and renew trusted ARP entries after containment.",
+            "ARP or identity spoofing can redirect traffic and enable interception or impersonation.",
+        ),
+    }
+    if correct and true_family in family_playbooks:
+        action, problem = family_playbooks[true_family]
+        actions.append(
+            {
+                "priority": "If confirmed live",
+                "action": action,
+                "problem": problem,
+                "evidence_sources": ["CICIoMT2024 CatBoost", "Local incident-response playbook"],
+                "evidence": (
+                    f"The held-out row was correctly classified as {true_family} with "
+                    f"{confidence:.2%} predicted-class confidence. This is conditional guidance, "
+                    "not proof that a live incident occurred."
+                ),
+            }
+        )
     actions.append(
         {
             "priority": "Review",
@@ -375,11 +428,28 @@ def evaluation_recommendations(row: Mapping[str, Any]) -> list[dict[str, Any]]:
 def evaluation_provider_evidence(row: Mapping[str, Any]) -> list[dict[str, Any]]:
     source_states = intelligence.status()["sources"]
     evidence = summarize_provider_evidence([], source_states)
+    has_context = isinstance(row.get("api_context"), Mapping)
+    provider_requirements = {
+        "otx": "the attached public IP/domain/hash from the official PCAP catalog",
+        "virustotal": "the attached public IP/domain/hash from the official PCAP catalog",
+        "osv": "the attached exact package name and version from the project dependency files",
+        "nvd": "the real CVE aliases returned by OSV for that exact package version",
+    }
     for provider in evidence:
         state = source_states.get(provider["provider_id"]) or {}
         provider["connection_status"] = str(state.get("status") or "unknown")
         provider["connection_verified_at"] = state.get("last_success")
         provider["connection_error"] = state.get("last_error")
+        if has_context:
+            provider["applicable"] = True
+            provider["status"] = "not_queried" if state.get("configured") else "not_configured"
+            provider["result"] = (
+                f"Ready for a fresh lookup using {provider_requirements[provider['provider_id']]}. "
+                "Open the report and select Verify API connectivity to query this source live. "
+                "The result is project context and is not treated as a native field of the "
+                "numeric TEST row."
+            )
+            continue
         if state.get("status") == "live":
             provider["result"] = (
                 f"Live API connection verified at {state.get('last_success') or 'the latest check'}. "
@@ -390,6 +460,101 @@ def evaluation_provider_evidence(row: Mapping[str, Any]) -> list[dict[str, Any]]
             provider["result"] = (
                 "No compatible row-specific indicator was available, and the latest API "
                 f"connection state is {state.get('status') or 'unknown'}."
+            )
+    return evidence
+
+
+async def enrich_evaluation_api_context(
+    row: Mapping[str, Any],
+    *,
+    force_refresh: bool,
+) -> list[dict[str, Any]]:
+    """Query the two real context planes attached to one evaluation sample.
+
+    Network observables come from the official PCAP indicator catalog and are
+    sent to OTX/VirusTotal.  Package coordinates come from the deployed
+    project's lock files and are sent to OSV; CVE aliases returned by OSV are
+    then sent to NVD.  Both remain non-attributable to the numeric TEST row.
+    """
+
+    context = row.get("api_context")
+    if not isinstance(context, Mapping):
+        return []
+    network = context.get("network")
+    dependency = context.get("dependency")
+    jobs: list[tuple[Mapping[str, Any], Any]] = []
+    if isinstance(network, Mapping) and str(network.get("indicator") or "").strip():
+        jobs.append(
+            (
+                network,
+                intelligence.enrich_indicator(
+                    str(network["indicator"]),
+                    force_refresh=force_refresh,
+                ),
+            )
+        )
+    if isinstance(dependency, Mapping) and str(dependency.get("identifier") or "").strip():
+        jobs.append(
+            (
+                dependency,
+                intelligence.enrich_package(
+                    str(dependency["identifier"]),
+                    force_refresh=force_refresh,
+                ),
+            )
+        )
+    if not jobs:
+        return []
+
+    results = await asyncio.gather(
+        *(job for _, job in jobs),
+        return_exceptions=True,
+    )
+    evidence: list[dict[str, Any]] = []
+    for (source, _), result in zip(jobs, results):
+        is_dependency = "identifier" in source
+        provenance = {
+            "evidence_scope": (
+                "deployed_platform_dependency"
+                if is_dependency
+                else "official_pcap_capture"
+            ),
+            "attributable_to_log": False,
+            "source_file": source.get("source_file"),
+            "assignment_method": context.get("assignment_method"),
+        }
+        indicator = str(
+            source.get("identifier") if is_dependency else source.get("indicator")
+        )
+        indicator_type = "package" if is_dependency else str(source.get("indicator_type"))
+        applicable_sources = ["osv", "nvd"] if is_dependency else ["otx", "virustotal"]
+        if isinstance(result, Exception):
+            evidence.append(
+                {
+                    "indicator": indicator,
+                    "type": indicator_type,
+                    "field": "project dependency context" if is_dependency else "official PCAP context",
+                    "verdict": "unknown",
+                    "confidence": 0.0,
+                    "sources": {},
+                    "coverage": {
+                        "applicable_sources": applicable_sources,
+                        "configured_sources": [],
+                        "available_sources": [],
+                        "queried_sources": [],
+                        "complete": False,
+                    },
+                    "message": str(result)[:240],
+                    "provenance": provenance,
+                }
+            )
+        else:
+            evidence.append(
+                {
+                    **result,
+                    "field": "project dependency context" if is_dependency else "official PCAP context",
+                    "provenance": provenance,
+                }
             )
     return evidence
 
@@ -680,7 +845,8 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
     tlp = "TLP:CLEAR"
     provider_evidence = evaluation_provider_evidence(row)
     indicator_evidence: list[dict[str, Any]] = []
-    evidence_mode = "not_applicable"
+    has_api_context = isinstance(row.get("api_context"), Mapping)
+    evidence_mode = "pending_context" if has_api_context else "not_applicable"
     return {
         "log_id": row["sample_id"],
         "report_type": "held_out_model_evaluation",
@@ -710,13 +876,18 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
         "risk_score": round(risk_score, 2),
         "model_probability": round(confidence, 6),
         "predicted_class_confidence": round(confidence, 6),
-        "intel_verdict": "CTI not applicable — this TEST row has no attributable indicator",
+        "intel_verdict": (
+            "Live CTI context ready — not attributable to the numeric TEST row"
+            if has_api_context
+            else "CTI not applicable — this TEST row has no attributable indicator"
+        ),
         "tlp": tlp,
         "sharing_classification": tlp,
         "evaluation_mode": True,
         "original_event_time": "Not available in the CICIoMT2024 flow export",
         "replay_time": None,
         "features": row["features"],
+        "api_context": row.get("api_context"),
         "class_probabilities": row["probabilities"],
         "provider_evidence": provider_evidence,
         "indicator_evidence": indicator_evidence,
@@ -735,7 +906,11 @@ def evaluation_dashboard_log(row: Mapping[str, Any]) -> dict[str, Any]:
             f"CatBoost attack probability P(non-Benign): {risk_score:.2f}% ({risk_level} model score).",
             f"Predicted-class confidence: {confidence:.2%}.",
             (
-                "Opening this report verifies live API connectivity only. Provider findings "
+                "This report can query all four APIs using separately sourced PCAP and "
+                "dependency context. Any returned findings are displayed as project context "
+                "and do not change the CatBoost evaluation result for this numeric TEST row."
+                if has_api_context
+                else "Opening this report verifies live API connectivity only. Provider findings "
                 "are not requested because this numeric TEST row contains no attributable "
                 "IP, domain, hash, CVE, or package identifier."
             ),
@@ -1284,17 +1459,28 @@ def evaluation_sample_live_evidence(sample_id: str) -> Any:
     force_refresh = True
     connectivity = run_provider_connectivity_check(force_refresh=force_refresh)
     checked_at = str(connectivity["checked_at"])
-
-    fused_risk = live_fused_risk(evaluation_dashboard_log(row), [])
+    evidence = runner.run(
+        enrich_evaluation_api_context(row, force_refresh=force_refresh),
+        timeout=120.0,
+    )
+    provider_rows = summarize_provider_evidence(
+        evidence,
+        intelligence.status()["sources"],
+    )
+    for provider in provider_rows:
+        for observation in provider.get("observations") or []:
+            observation["attributable_to_log"] = False
+    fused_risk = live_fused_risk(evaluation_dashboard_log(row), evidence)
+    context_ready = bool(evidence)
     return jsonify({
         "sample_id": sample_id,
         "checked_at": checked_at,
-        "evidence_mode": "connectivity_only",
+        "evidence_mode": "capture_and_dependency_context" if context_ready else "connectivity_only",
         "all_four_connected": bool(connectivity["all_four_connected"]),
         "all_four_available": bool(connectivity["all_four_connected"]),
-        "provider_evidence": evaluation_provider_evidence(row),
-        "indicator_evidence": [],
-        "live_query": False,
+        "provider_evidence": provider_rows if context_ready else evaluation_provider_evidence(row),
+        "indicator_evidence": evidence,
+        "live_query": context_ready,
         "connectivity_check": True,
         "provider_findings_used_as_evidence": False,
         "cache_used": False,
@@ -1304,9 +1490,15 @@ def evaluation_sample_live_evidence(sample_id: str) -> Any:
         "risk_adjustment_applied": fused_risk["applied"],
         "live_risk_reason": fused_risk["reason"],
         "message": (
-            f"Live API connectivity was checked at {checked_at}. No indicator was sent for "
-            "security enrichment because this CICIoMT2024 TEST row contains numeric model "
-            "features only and has no attributable IP, domain, hash, CVE, or package identifier."
+            f"All four APIs were queried live at {checked_at} using real project context. "
+            "OTX and VirusTotal received a public indicator extracted from the official PCAP; "
+            "OSV received an exact deployed dependency version; NVD received any real CVE "
+            "aliases returned by OSV. These findings provide investigation details and response "
+            "guidance, but they are not native columns of this numeric TEST row and do not alter "
+            "its CatBoost evaluation result."
+            if context_ready
+            else f"Live API connectivity was checked at {checked_at}, but this sample has no "
+            "attached API context. Regenerate the evaluation artifact with the API-context script."
         ),
     })
 
