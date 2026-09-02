@@ -19,6 +19,32 @@ from dotenv import load_dotenv
 from cti.indicators import CVE_PATTERN, classify_indicator, is_public_indicator
 
 
+# Well-known shared infrastructure that shows up in OTX pulses as incidental
+# context (e.g. a botnet report mentioning "the malware resolved via 8.8.8.8")
+# rather than as the actual malicious indicator. Skipping the verdict for these
+# avoids flagging benign DNS resolvers / cloud APIs as malicious.
+KNOWN_BENIGN_INDICATORS = {
+    "8.8.8.8", "8.8.4.4",       # Google Public DNS
+    "1.1.1.1", "1.0.0.1",       # Cloudflare DNS
+    "4.2.2.2", "4.2.2.1",       # Level3 DNS
+    "9.9.9.9",                  # Quad9 DNS
+    "time.nist.gov",
+}
+KNOWN_BENIGN_DOMAIN_SUFFIXES = (
+    ".googleapis.com",
+    ".google.com",
+    ".gstatic.com",
+)
+
+
+def _is_known_benign(indicator: str, indicator_type: str) -> bool:
+    if indicator_type in {"ipv4", "ipv6", "domain"} and indicator in KNOWN_BENIGN_INDICATORS:
+        return True
+    if indicator_type == "domain" and indicator.endswith(KNOWN_BENIGN_DOMAIN_SUFFIXES):
+        return True
+    return False
+
+
 OSV_API_BASE = "https://api.osv.dev/v1"
 NVD_API_BASE = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 OTX_API_BASE = "https://otx.alienvault.com/api/v1"
@@ -353,6 +379,24 @@ class ThreatIntelligenceService:
     async def _enrich_ioc(self, indicator: str, indicator_type: str) -> dict[str, Any]:
         """Query OTX and VirusTotal for a public network or file indicator."""
 
+        if _is_known_benign(indicator, indicator_type):
+            return {
+                "indicator": indicator,
+                "type": indicator_type,
+                "verdict": "clean",
+                "confidence": 0.0,
+                "sources": {},
+                "coverage": {
+                    "applicable_sources": ["otx", "virustotal"],
+                    "configured_sources": [],
+                    "available_sources": [],
+                    "queried_sources": [],
+                    "complete": True,
+                },
+                "message": "Known shared infrastructure (DNS resolver / cloud API) — skipped verdict scoring.",
+                "cached": False,
+            }
+
         tasks: dict[str, asyncio.Task] = {}
         if self.otx_api_key:
             tasks["otx"] = asyncio.create_task(self._lookup_otx(indicator, indicator_type))
@@ -377,7 +421,11 @@ class ThreatIntelligenceService:
         vt_confidence = min(1.0, (malicious + 0.5 * suspicious) / total_engines * 4)
         otx_confidence = min(1.0, pulse_count / 4)
         confidence = round(1 - (1 - 0.75 * otx_confidence) * (1 - 0.9 * vt_confidence), 4)
-        malicious_match = pulse_count > 0 or malicious > 0 or suspicious > 1
+        # Require a stronger signal than "mentioned once": a single incidental
+        # OTX pulse or one VT engine flag is a common false positive on shared
+        # infrastructure (DNS resolvers, CDNs, cloud APIs).
+        vt_ratio = (malicious + 0.5 * suspicious) / total_engines
+        malicious_match = pulse_count >= 2 or malicious >= 2 or suspicious >= 3 or vt_ratio >= 0.05
 
         configured_sources = [
             source for source in ("otx", "virustotal") if self._states[source]["configured"]
@@ -845,3 +893,4 @@ class ThreatIntelligenceService:
         except Exception as exc:
             self._record("nvd", started, exc)
             raise
+        
