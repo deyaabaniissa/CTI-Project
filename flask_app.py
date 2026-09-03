@@ -28,6 +28,7 @@ from cti.db.site_persistence import SitePersistenceService
 from cti.extraction import extract_indicators
 from cti.intelligence import ThreatIntelligenceService
 from cti.pcap import extract_pcap_indicators
+from cti.pcap_features import compute_flow_features
 from cti.reporting import summarize_provider_evidence
 
 
@@ -1254,12 +1255,25 @@ def analyze_pcap_file(
         timeout=max(90.0, 25.0 * (len(selected_indicators) + len(cve_ids))),
     )
 
+    feature_source = "manual" if feature_payload is not None else None
+    feature_extraction_error: str | None = None
+    if feature_payload is None:
+        try:
+            feature_payload = compute_flow_features(source, max_packets=max_packets)
+            feature_source = "computed_from_pcap"
+        except Exception as exc:  # noqa: BLE001 - surfaced as a "not_run" reason, never invented
+            feature_payload = None
+            feature_extraction_error = str(exc)
+
     model_result: dict[str, Any]
     if feature_payload is None:
         model_result = {
             "status": "not_run",
             "reason": (
-                "The PCAP supplies packet evidence, but not the exact 12 aggregated flow features "
+                f"The 12 aggregated flow features could not be computed from this capture "
+                f"({feature_extraction_error}). No model prediction was invented."
+                if feature_extraction_error
+                else "The PCAP supplies packet evidence, but not the exact 12 aggregated flow features "
                 "required by the deployed CatBoost artifact. No model prediction was invented."
             ),
             "required_features": list(model_service.features),
@@ -1315,6 +1329,7 @@ def analyze_pcap_file(
             "protocol_counts": extracted["protocol_counts"],
         },
         "model": model_result,
+        "model_feature_source": feature_source,
         "pcap_evidence": {
             "indicators": extracted["indicators"][:100],
             "flows_preview": extracted["flows"][:25],
@@ -1923,4 +1938,4 @@ if __name__ == "__main__":
         port=int(os.getenv("FLASK_PORT", "8000")),
         debug=os.getenv("FLASK_DEBUG", "false").lower() == "true",
         use_reloader=False,
-    )
+    ) 
